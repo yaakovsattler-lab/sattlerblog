@@ -1,0 +1,22 @@
+# dependencies and build output
+node_modules/
+.next/
+out/
+tsconfig.tsbuildinfo
+next-env.d.ts
+
+# secrets - this repository is public. Nothing with a token, key or password
+# is ever committed. Local values go in .env.local; deployed values live in
+# the hosting provider's environment settings.
+.env*
+!.env.example
+
+# licensed font files (Almoni Neue, commercial) - see README
+src/fonts/
+
+# working material that does not belong in the repo
+screenshots/
+.claude/
+scripts/__pycache__/
+.DS_Store
+*.log

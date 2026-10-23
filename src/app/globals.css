@@ -1,0 +1,5028 @@
+/*
+ * Life stages prototype - one section, nothing else.
+ *
+ * Source of truth for every value: Figma 148:120 (desktop, 1440 wide). Where a
+ * value already exists in the built site (site/src/app/home.css) it is copied
+ * from there rather than re-measured, so the prototype and the site cannot
+ * drift apart on a number that was already reviewed.
+ *
+ * Deviations from the frame, all deliberate and all listed in the delivery
+ * note - nothing here is a quiet decision:
+ *   1. The media box is a 1:1 square, not the frame's 632x612, and it is
+ *      never cropped. The motion brief is explicit: the clips are 640x640 and
+ *      3-to-4 has content right at the edge, so object-fit: cover would eat it.
+ *   2. The strip carries EIGHT stations. The frame draws seven; the eighth
+ *      ("לא בטוח") is approved copy that the frame has never been updated for.
+ *   3. The active station is marked by an accent label plus an accent line
+ *      filling across the rule, per the section brief. The frame shows
+ *      the accent label; the filling line is not drawn in it.
+ *
+ * RTL note, and the reason it is a note: the page is dir="rtl" and NOTHING
+ * here uses flex-direction: row-reverse. Under dir="rtl" a row is already
+ * right-to-left, and row-reverse flips it back to left-to-right - a known
+ * trap on this project. Direction was checked by looking at the
+ * rendered page, not by reasoning about the rule.
+ */
+
+:root {
+  /* tokens - site/src/app/globals.css, unchanged */
+  --paper: #fbfaf5;
+  --ink: #1a1a1a;
+  --ink-2: #0b0b0b;
+  --accent: #d9531e;
+  /* 19.09 - was #8c8c8c, which measured 3.36:1 on white and 3.22:1 on the
+     paper background: under AA everywhere it was used. #737373 is the
+     LIGHTEST grey that clears 4.5:1 on both (4.74:1 white, 4.54:1 paper), so
+     the hierarchy Tal designed is kept and the text is legible. */
+  /* ==========================================================================
+     WHICH SIZE TO USE - confirmed by Nir, 20.09, after it went wrong once.
+
+       --type-body (19px)  LONG-FORM READING ONLY: the post body, a story
+                           block, a lead paragraph someone reads through.
+       --type-small (16px) everything that used to sit on the 15px floor.
+       the frame's own px  TEXT A FIGMA FRAME HAS MEASURED INSIDE A COMPONENT
+                           - a card title, a card description, a section's
+                           copy column - floored at 15px, never raised to
+                           --type-body.
+
+     The last rule is the one that is easy to get wrong, and the cost is not
+     theoretical. Applying --type-body to frame-measured component text grew
+     the community copy column from 413 to 495 and its card from 503 to 585,
+     which dropped the centred illustration 41px and pulled the whole
+     composition apart; and it grew every start-here card from the frame's
+     197-227 to 252-274. A frame that specifies 16px or 17px inside a card has
+     measured the card around it. Raising that text silently resizes the card.
+     ========================================================================== */
+
+  /* THE COMFORTABLE SIZES (Elyakim + Nir, 19.09). Hebrew reads smaller than
+     Latin at the same size - no ascenders or descenders to separate words - so
+     the site was hard to read at 17-18px body with a lot of secondary text
+     sitting on the floor. --type-min stays 15px as the HARD minimum that
+     floor-all-pages.mjs enforces; these two are the comfortable sizes, and
+     nothing should use --type-min as a size any more. */
+  --type-body: 19px;
+  --type-small: 16px;
+
+  --muted: #737373;
+  /* the same role on a DARK surface, where darkening would do the opposite.
+     #8c8c8c measures 5.18:1 on --ink and 5.85:1 on --ink-2; the light-surface
+     value would be 3.67:1 there. One role, two surfaces, two values - the
+     first attempt at this shipped a single token and broke the footer. */
+  --muted-on-dark: #8c8c8c;
+  --ease: cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* The media box is square and shrinks to fit a short viewport. 300px is the
+     rest of the sticky frame: 90+90 padding, the 67 gap, the 47 strip. */
+  --media: min(632px, calc(100vh - 300px));
+
+  /* How much scrolling one of the eight steps takes. This is the only number
+     that sets the pace of the section - change it here and nothing else needs
+     touching: the frame mapping is a pure function of progress, so a step
+     always plays its clip's whole in..out window, just over more or less
+     scrolling, and the progress bar always runs 0 to 100% across the section.
+     Elyakim, 18.09, in three steps on the same day: 300vh -> 180 (a 40% cut)
+     -> 120 -> 100, each time because it still read as too long. At 100vh the
+     section is about 8 screens. Measured totals are in the delivery note. */
+  --step-scroll: 100vh;
+
+  /* Station 8 has no outgoing clip - it holds the last frame of 7-to-8 - so a
+     full-length step there is scrolling with nothing moving in it. Elyakim,
+     18.09: give it about a third of a step so the section ENDS instead of
+     stalling. The other seven stay equal to each other.
+
+     This is the single source of truth for that fraction. The component reads
+     it back out of the computed style and builds its progress mapping from it,
+     so the scroll distance and the frame mapping cannot disagree - retune it
+     here and the steps follow. */
+  --last-step-scale: 0.34;
+
+  /* The inset every edge under 1024 uses: the row's padding, the bar's
+     padding, and the inline padding of both horizontal scrollers. One value,
+     because a scroller whose gutter does not match the block above it is
+     exactly the defect this was introduced to fix. */
+  --edge-gutter: 20px;
+
+  /* ---------------------------------------------------------------
+     THE PAGE CONTAINER. One definition; every section inherits it.
+
+     The design is 1440 with 64px inside each edge, so content is 1312 wide
+     and stops there. Above 1440 the extra width goes into the gutters and the
+     content centres - a paragraph that keeps widening across a 2560 monitor is
+     the defect, not a feature.
+
+     `--page-inline` is the whole mechanism: it is the larger of the design
+     gutter and half the leftover width, so a section only has to say
+     `padding-inline: var(--page-inline)` and it is both capped and centred,
+     with no wrapper element. Backgrounds, colour bands, the ticker and any
+     other full-bleed thing still span the viewport, because the cap is on the
+     PADDING of the section and not on the section itself.
+
+     A new section inherits this by using the variable. Nothing should
+     re-declare 1440 or 64 anywhere else. */
+  --page-max: 1440px;
+  --page-gutter: 64px;
+  --content-max: calc(var(--page-max) - var(--page-gutter) * 2); /* 1312 */
+  --page-inline: max(
+    var(--page-gutter),
+    calc((100% - var(--content-max)) / 2)
+  );
+
+  /* Minimum type size. Elyakim's rule, 18.09: no text on the page renders
+     below this at any breakpoint, and it OVERRIDES the Figma frame where the
+     two disagree - the frame has 14px station labels and this build had 12px.
+     `npm run verify` fails if any rendered text node computes under it, so it
+     cannot quietly come back. */
+  --type-min: 15px;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  /* No smooth-scroll: it fights a scrubbed ScrollTrigger and makes the frame
+     mapping look laggy when it is not. */
+  scroll-behavior: auto;
+}
+
+body {
+  margin: 0;
+  background: #fff;
+  color: var(--ink);
+  font-family: var(--font-family-base), "Arial Hebrew", "Noto Sans Hebrew", Arial,
+    sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+a:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+}
+
+/* ---------- prototype chrome (not part of the section) ---------- */
+
+.proto-band {
+  background: var(--paper);
+  border-block: 1px solid rgba(26, 26, 26, 0.12);
+  padding: 120px 24px;
+  text-align: center;
+  font-size: var(--type-small);   /* was 14px */
+  color: var(--muted);
+}
+
+/* ================================================================
+   The section
+   ================================================================ */
+
+.ls {
+  position: relative;
+  background: #fff;
+  /* Seven full steps plus the short last one, plus the one viewport the sticky
+     frame occupies. The scrubbed range is height - 100vh. */
+  height: calc((7 + var(--last-step-scale)) * var(--step-scroll) + 100vh);
+}
+
+/* Elyakim, 18.09: `space-between` pinned the row to the top and the strip to
+   the bottom, so every pixel the screen grew became dead air in the middle -
+   worse the taller the monitor. The composition is now CENTRED as one block
+   with the strip beneath it, and the gap between the two is a fixed 67px (the
+   frame's own gap, 149:147 to 213:375) at every height.
+
+   On a short viewport the constraint flips: there is no spare height to
+   distribute and the square is what gives, which --media already does. */
+.ls__sticky {
+  position: sticky;
+  top: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 40px 0;
+  overflow: hidden;
+}
+
+/* ---------- the row ---------- */
+
+.ls__row {
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  padding-inline: var(--page-inline);
+  height: var(--media);
+}
+
+.ls__col {
+  width: 574px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  align-items: flex-start;
+}
+
+.ls__top {
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 25px;
+}
+
+.ls__badge {
+  /* static: the one thing in the column that never swaps */
+  display: inline-block;
+  margin: 0;
+  background: #f5f5f5;
+  border-radius: 20px;
+  padding: 10px 15px;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 0.86;
+  letter-spacing: -0.6px;
+  color: var(--ink);
+}
+
+.ls__title {
+  margin: 0;
+  font-size: 57px;
+  font-weight: 900;
+  line-height: 0.8;
+  letter-spacing: -2.28px;
+  color: var(--ink);
+  /* the frame's single title fits on one line; station 8's approved title does
+     not, so wrapping is allowed rather than clipped */
+  text-wrap: balance;
+}
+
+.ls__blurb {
+  margin: 0;
+  width: 100%;
+  font-size: var(--type-body);
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.ls__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--ink-2);
+  color: #fff;
+  border-radius: 14px;
+  padding: 18px 32px;
+  font-size: 18px;
+  font-weight: 800;
+  white-space: nowrap;
+  transition: background 150ms var(--ease);
+}
+
+.ls__cta:hover {
+  background: #000;
+}
+
+/* ---------- the three post cards ---------- */
+
+.ls__cards {
+  display: flex;
+  align-items: stretch;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ls__cards > li {
+  display: flex;
+}
+
+.ls__cards > li:not(:last-child) {
+  margin-inline-end: -6px;
+}
+
+.ls__card {
+  width: 194px;
+  min-height: 123px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  background: #fff;
+  border: 1px solid rgba(26, 26, 26, 0.12);
+  border-radius: 20px;
+  padding: 16px 21px;
+  color: var(--ink);
+  transition: border-color 200ms var(--ease), transform 200ms var(--ease);
+}
+
+/* Figma 191:477 draws the middle card tilted with an accent border and a
+   pointer on it. The design lead ruled on 04.09 that this is
+   the hover state, not a default. */
+.ls__card:hover {
+  border-color: var(--accent);
+  transform: rotate(2deg);
+  position: relative;
+  z-index: 1;
+}
+
+.ls__card-title {
+  font-size: var(--type-body);
+  font-weight: 700;
+  line-height: 20px;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.ls__card-text {
+  /* was 12.5px/15px in the frame - raised to the floor. Three clamped lines
+     therefore occupy 60px instead of 45px and the card grows about 15px
+     taller; the card height is a min-height and absorbs it. */
+  font-size: var(--type-small);
+  line-height: 20px;
+  color: #666;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* ---------- the media box ---------- */
+
+.ls__media {
+  margin: 0;
+  flex: none;
+  width: var(--media);
+  height: var(--media);
+}
+
+.ls__media canvas {
+  display: block;
+  width: 100%;
+  height: 100%;
+  /* deliberately NOT object-fit: cover - the whole square, always */
+  object-fit: contain;
+}
+
+/* ---------- the progress bar ---------- */
+
+.ls__bar {
+  padding-inline: var(--page-inline);
+  /* the frame's gap between the row and the strip; it no longer stretches */
+  margin-top: 67px;
+  flex: none;
+}
+
+.ls__rule {
+  position: relative;
+  height: 1px;
+  background: #000;
+}
+
+.ls__fill {
+  position: absolute;
+  inset: -1px 0 auto 0;
+  height: 3px;
+  background: var(--accent);
+  /* RTL: the line grows from the right edge, the same direction as reading */
+  transform-origin: right center;
+  transform: scaleX(0);
+  will-change: transform;
+}
+
+.ls__stations {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin: 10px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ls__station {
+  display: inline-flex;
+  align-items: center;
+  height: 37px;
+}
+
+.ls__station-icon {
+  width: 37px;
+  height: 37px;
+  flex: none;
+  display: block;
+  background: var(--icon) center / contain no-repeat;
+}
+
+.ls__station.is-active .ls__station-icon {
+  background: var(--accent);
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+.ls__station-label {
+  /* was 12px here, 14px in the frame - both under the floor. */
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: var(--muted);
+  white-space: nowrap;
+  transition: color 150ms var(--ease);
+}
+
+.ls__station.is-active .ls__station-label {
+  color: var(--accent);
+}
+
+/* ---------- 1024-1439: the frame's fixed widths stop fitting ---------- */
+
+@media (max-width: 1439px) and (min-width: 1024px) {
+  .ls__row {
+    padding: 0 40px;
+    gap: 32px;
+  }
+
+  .ls__col {
+    width: min(574px, 48%);
+  }
+
+  .ls__media {
+    width: var(--media);
+    height: var(--media);
+  }
+
+  .ls__title {
+    font-size: clamp(38px, 3.6vw, 57px);
+    letter-spacing: -1.6px;
+  }
+
+  .ls__cards > li,
+  .ls__card {
+    width: 100%;
+  }
+
+  .ls__bar {
+    padding: 0 40px;
+  }
+}
+
+/* ---------- under 1024: stacked, same mechanism ----------
+   The Figma node is the desktop frame only. This stack is an implementation
+   choice so the prototype can be judged at phone width too - the motion, the
+   copy and the progress bar are identical, only the arrangement differs. It is
+   NOT a mobile design and is flagged as such in the delivery note. */
+
+@media (max-width: 1023px) {
+  :root {
+    /* below the design width there is no leftover to distribute - the gutter
+       is simply the phone gutter, and --page-inline follows it everywhere */
+    --page-gutter: var(--edge-gutter);
+
+    /* Everything in the sticky frame that is NOT the square: the badge, the
+       heading, the paragraph, the CTA, the card row, the progress bar and the
+       gaps between them. The square is what absorbs a short viewport, so this
+       number decides whether the progress bar survives the fold.
+
+       Measured, 18.09, and it is why it moved from 380 to 500: the 15px type
+       floor and the two-line card title took the card row from 104px to 159px,
+       and at 375x667 that pushed the progress bar 67-118px past the fold at
+       every one of the eight steps - .ls__sticky is overflow:hidden, so it was
+       not scrolled off, it was invisible. Re-measure this whenever anything in
+       the column changes height - the 19px body of 19.09 grew the column to
+       413px and 500 stopped being enough, which check-ls-composition caught at
+       375x812 as a 4px overflow. 413 column + the bar, the gaps and the
+       sticky padding, plus slack. */
+    --mobile-reserve: 520px;
+
+    /* Three caps, and all three are load-bearing. Width and height keep the
+       square inside the viewport; the flat 480px keeps it from eating the
+       column on a tall tablet. Measured at 768x1024 without that third cap:
+       the square came out 644px and pushed the whole progress bar off the
+       bottom of the sticky frame. */
+    --media: min(100vw - 40px, calc(100vh - var(--mobile-reserve)), 480px);
+  }
+
+  .ls__sticky {
+    padding: 20px 0 16px;
+    justify-content: flex-start;
+    gap: 16px;
+  }
+
+  .ls__row {
+    flex-direction: column;
+    align-items: center;
+    padding: 0 var(--edge-gutter);
+    height: auto;
+    gap: 16px;
+  }
+
+  .ls__col {
+    order: 2;
+    width: 100%;
+    gap: 14px;
+  }
+
+  .ls__top {
+    gap: 10px;
+  }
+
+  .ls__badge {
+    font-size: var(--type-small);
+    padding: 8px 12px;
+    border-radius: 16px;
+  }
+
+  .ls__title {
+    font-size: 30px;
+    line-height: 1;
+    letter-spacing: -1px;
+  }
+
+  .ls__blurb {
+    font-size: var(--type-small);   /* was 14px */
+  }
+
+  .ls__cta {
+    font-size: var(--type-small);
+    padding: 13px 22px;
+    border-radius: 999px;
+  }
+
+  .ls__media {
+    order: 1;
+  }
+
+  /* three cards will not fit side by side on a phone - they become a swipe
+     row rather than shrinking into unreadable columns.
+     INVENTED MOBILE ARRANGEMENT - flagged for Tal, there is no mobile frame
+     for this section.
+
+     The row is full-bleed and carries its own gutter rather than living
+     inside the parent's 20px padding. That is the whole fix for "a card is
+     sliced by the viewport edge": with the padding on the PARENT, the
+     scroller's content box ended at the gutter line and a card was chopped
+     there, mid-word, with nothing after it. With the padding on the SCROLLER
+     plus a matching scroll-padding, a snapped card sits 20px in from the
+     screen edge like the text above it, and the next card's peek runs off the
+     real screen edge - which reads as "there is more", not as a cut.
+
+     `--edge-gutter` is that inset in one place; it has to match .ls__row's
+     inline padding or the cards stop lining up with the heading. */
+  .ls__cards {
+    width: calc(100% + var(--edge-gutter) * 2);
+    margin-inline: calc(var(--edge-gutter) * -1);
+    padding-inline: var(--edge-gutter);
+    scroll-padding-inline: var(--edge-gutter);
+    overflow-x: auto;
+    scroll-snap-type: x mandatory;
+    gap: 8px;
+    padding-bottom: 4px;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+
+  .ls__cards::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ls__cards > li {
+    scroll-snap-align: start;
+  }
+
+  .ls__cards > li:not(:last-child) {
+    margin-inline-end: 0;
+  }
+
+  .ls__card {
+    /* Sized so the card that is not fully on screen is clearly a PEEK and not
+       a chopped card. At 240px wide the second card showed 107px - nearly half
+       a card of text cut mid-word, which is what read as a defect. At 300px it
+       shows about 47px: enough to say "there is another one", too little to
+       look like a sentence someone sliced. A horizontal swipe row always has
+       one partially visible card at rest - that is the affordance - so the fix
+       is the SIZE of the peek, not its existence. */
+    width: min(80vw, 300px);
+    min-height: 104px;
+  }
+
+  /* One line was a hard cut at this width - "25% מס נשמע יותר מ-%..." loses
+     the sentence. Two lines at 15px still fits the card.
+     INVENTED - flagged for Tal. */
+  .ls__card-title {
+    -webkit-line-clamp: 2;
+  }
+
+  .ls__bar {
+    margin-top: auto;
+    padding: 0 var(--edge-gutter);
+  }
+
+  /* the eight names do not fit across a phone - the row scrolls and the
+     active one is kept in view by the component.
+
+     Same treatment as the card row, and for the same reason: with the padding
+     on .ls__bar the scroller's content box ended at the gutter line and the
+     outermost label was chopped there mid-word. The inset moves onto the
+     scroller, which is then full-bleed, so a label at rest sits
+     --edge-gutter in from the screen edge and anything past it runs off the
+     real edge as a scroll hint. */
+  .ls__stations {
+    gap: 14px;
+    justify-content: flex-start;
+    width: calc(100% + var(--edge-gutter) * 2);
+    margin-inline: calc(var(--edge-gutter) * -1);
+    padding-inline: var(--edge-gutter);
+    scroll-padding-inline: var(--edge-gutter);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .ls__stations::-webkit-scrollbar {
+    display: none;
+  }
+
+  .ls__station {
+    flex: none;
+    height: 28px;
+  }
+
+  .ls__station-icon {
+    width: 24px;
+    height: 24px;
+  }
+}
+
+/* ---------- reduced motion ----------
+   The layout technique stays; the interpolation does not. The component also
+   stops fetching frame sequences entirely - one frame per step is all it
+   loads - so this is a real weight saving, not just a visual concession. */
+
+@media (prefers-reduced-motion: reduce) {
+  .ls__card,
+  .ls__cta,
+  .ls__station-label,
+  .ls__card-arrow {
+    transition: none;
+  }
+
+  .ls__card:hover {
+    transform: none;
+  }
+}
+
+/* ================================================================
+   Round A - Navbar, Hero, Footer, and the plain pages
+   Every value below is from the Figma node named in the comment, read with
+   get_design_context on 18.09. Where a value is NOT from the frame it says so.
+   The 15px floor (--type-min) overrides the frame wherever they disagree, and
+   every one of those places is named.
+   ================================================================ */
+
+/* ---------- shared: the primary button (Figma style "Button - כפתור") ---------- */
+
+.cta-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: var(--ink-2);
+  color: #fff;
+  border-radius: 14px;
+  padding: 18px 32px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  white-space: nowrap;
+  transition: background 150ms var(--ease);
+}
+
+.cta-primary:hover {
+  background: #000;
+}
+
+/* ---------- entrances (Elyakim item 8: scroll entrances only) ---------- */
+
+.reveal.is-armed {
+  opacity: 0;
+  transform: translateY(16px);
+  transition: opacity 600ms var(--ease), transform 600ms var(--ease);
+}
+
+.reveal.is-armed.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .reveal.is-armed {
+    opacity: 1;
+    transform: none;
+    transition: none;
+  }
+}
+
+/* An entrance that has not fired yet is invisible, which is correct on screen
+   and wrong everywhere else: printing, or a reader-mode extraction, would drop
+   every section below the fold. Anything that is not a live screen gets the
+   content unconditionally. */
+@media print {
+  .reveal.is-armed {
+    opacity: 1 !important;
+    transform: none !important;
+  }
+}
+
+/* ---------- Navbar - Figma 481:217 ---------- */
+
+.nav {
+  position: fixed;
+  inset: 20px 0 auto 0;
+  z-index: 20;
+  display: flex;
+  justify-content: center;
+  pointer-events: none;
+  transition: transform 300ms var(--ease), opacity 300ms var(--ease);
+}
+
+/* INVENTED: the frame has no hidden state. 20px is the bar's own top offset,
+   so it clears its own shadow on the way out. */
+.nav.is-hidden {
+  transform: translateY(calc(-100% - 20px));
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .nav {
+    transition: none;
+  }
+}
+
+.nav__pill {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 75px;
+  background: var(--paper);
+  border: 1px solid #bebebe;
+  border-radius: 30px;
+  padding: 17px 45px;
+  /* the frame's five-layer shadow, verbatim */
+  box-shadow: 29px 215px 61px 0 rgba(0, 0, 0, 0), 19px 138px 56px 0 rgba(0, 0, 0, 0.01),
+    10px 77px 47px 0 rgba(0, 0, 0, 0.03), 5px 34px 35px 0 rgba(0, 0, 0, 0.05),
+    1px 9px 19px 0 rgba(0, 0, 0, 0.05);
+}
+
+/* dir=rtl puts the first child at the RIGHT, which is where the frame has the
+   wordmark. No row-reverse anywhere - the same trap as the life-stages row. */
+.nav__logo {
+  display: block;
+  flex: none;
+}
+
+.nav__logo img {
+  display: block;
+  width: 99px;
+  height: 38px;
+}
+
+.nav__links {
+  display: flex;
+  align-items: center;
+  gap: 25px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.nav__link {
+  font-size: var(--type-small);
+  font-weight: 500;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* 149:145 - the accent rule under the current link, as the exported asset */
+.nav__link.is-current {
+  background: url("/brand/nav-underline.svg") no-repeat bottom center;
+  background-size: 100% 2.13px;
+  padding-bottom: 6px;
+}
+
+.nav__cta {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink-2);
+  color: #fff;
+  border-radius: 14px;
+  /* The frame is 96x40 with a 14px label. 14px is under the floor, so the
+     label is 15px and the pill sizes to its content rather than clipping. */
+  min-height: 40px;
+  padding: 11px 18px;
+  font-size: var(--type-small);
+  font-weight: 700;
+  white-space: nowrap;
+  transition: background 150ms var(--ease);
+}
+
+.nav__cta:hover {
+  background: #000;
+}
+
+/* the disclosure is desktop-hidden; it only exists under 1024 */
+.nav__menu {
+  display: none;
+}
+
+/* 19.09 - the CTA and the menu button are one group, pinned to the LEFT end of
+   the pill. On desktop the menu is hidden, so the group is just the CTA and the
+   pill's 75px rhythm is unchanged. */
+.nav__actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-inline-start: auto;
+}
+
+/* ---------- Hero - Figma 5:4 ---------- */
+
+/* 5:4 is 1440x845 with 140/120 padding, so its content box is 585 tall and
+   BOTH columns are centred inside it - the copy (428) lands at y=218.5 and the
+   character (248.5) at y=308.26. Without the reserve the section collapses to
+   the copy's own height (624 total, -26%) and nothing sits where it is drawn. */
+.hero {
+  background: #fcfcfc;
+  box-sizing: border-box;
+  min-height: 845px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 140px var(--page-inline) 120px;
+  /* 5:5 sits at x=0, hard against the viewport edge. Under dir=rtl that edge
+     is the inline-END, so the padding there is 0 at and below the design
+     width. Above 1440 it grows to the container's own offset, which keeps the
+     earlier decision (flagged for Tal, 18.09): the hand waves at the copy and
+     the bubble points at it, so on a 2560 screen the character follows the
+     container instead of gesturing at half a metre of empty paper. */
+  padding-inline-end: max(0px, calc((100% - var(--page-max)) / 2));
+  overflow: hidden;
+}
+
+/* 5:5 - the character is hard against the far edge, 0 padding on that side */
+.hero__character {
+  position: relative;
+  flex: none;
+  width: 202px;
+  height: 248px;
+}
+
+/* 193:501 at (0.79, 0) and 193:587 at (0, 109.71) INSIDE the 202x248 character
+   box - physical left, not inset-inline-start. Under dir=rtl the logical
+   property pins to the RIGHT edge, which left the 201px hand at x=1 and the
+   139px shirt at x=63: one drawing split 62px apart. Same lesson as the
+   community block - a group's parts are placed against their own box. */
+.hero__hand {
+  position: absolute;
+  left: 0.79px;
+  top: 0;
+  width: 201px;
+  height: 116px;
+  object-fit: contain;
+}
+
+.hero__shirt {
+  position: absolute;
+  left: 0;
+  top: 109.71px;
+  width: 139px;
+  height: 139px;
+}
+
+/* 5:7 is 705x428 while its own children span 359 - the frame carries 69px of
+   slack below the CTA, and that slack is what puts the headline at y=218.5.
+   Reserving it lands the copy where the frame draws it instead of 32px lower. */
+.hero__copy {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: flex-start;
+  gap: 24px;
+  width: 705px;
+  min-height: 428px;
+  max-width: 100%;
+}
+
+.hero__title {
+  margin: 0;
+  font-size: 116px;
+  font-weight: 800;
+  line-height: 0.86;
+  color: var(--ink);
+  text-align: right;
+  width: 100%;
+}
+
+.hero__line {
+  display: block;
+}
+
+.hero__line--second {
+  position: relative;
+  display: block;
+}
+
+/* 202:287 - the coin sits against the end of the second line */
+.hero__coin {
+  display: inline-block;
+  width: 36px;
+  height: 36px;
+  margin-inline-start: 8px;
+  vertical-align: baseline;
+}
+
+.hero__blurb {
+  margin: 0;
+  width: 100%;
+  font-size: 20px;
+  line-height: 1.4;
+  color: var(--ink);
+  text-align: right;
+}
+
+.hero__action {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  align-self: flex-start;
+}
+
+.hero__note {
+  margin: 0;
+  /* the frame says 14px - under the floor */
+  font-size: var(--type-small);
+  color: #6b6b6b;
+  white-space: nowrap;
+}
+
+/* ---------- Footer - Figma 578:1512 ---------- */
+
+.footer {
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  /* The frame puts the character at the RIGHT. Under dir=rtl that is
+     flex-start, not flex-end - the frame is an LTR artboard of an RTL design,
+     so its `items-end` means "right" and reads as the opposite here. */
+  align-items: flex-start;
+}
+
+/* 572:615 - the character overlaps the strip below it */
+.footer__character {
+  display: block;
+  width: 462px;
+  height: 250px;
+  object-fit: contain;
+  object-position: bottom;
+  /* 572:615 is a 668px box at the frame's right edge with the drawing inset
+     inside it; 94px is that inset, measured off the frame. Above 1440 it
+     follows the container rather than the screen edge, so it stays over the
+     brand block it belongs to. */
+  margin-inline-start: calc(var(--page-inline) + 94px - var(--page-gutter));
+  margin-bottom: -1px;
+}
+
+.ticker {
+  width: 100%;
+  height: 56px;
+  background: var(--accent);
+  overflow: hidden;
+  display: flex;
+  align-items: center;
+}
+
+.ticker__track {
+  display: flex;
+  width: max-content;
+  /* ~1.6s per item keeps the reading speed the same whatever the list length */
+  animation: ticker calc(var(--ticker-count, 19) * 1.6s) linear infinite;
+}
+
+/* two identical halves, moved by exactly half the track - the only way to loop
+   a marquee without a visible seam */
+.ticker__run {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--paper);
+  white-space: pre;
+  padding-inline-end: 0;
+}
+
+@keyframes ticker {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(50%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ticker__track {
+    animation: none;
+  }
+}
+
+.footer__block {
+  width: 100%;
+  background: var(--ink);
+  border-top: 0;
+  padding: 40px var(--page-inline) 24px;
+  position: relative;
+}
+
+/* 572:619 - a hairline inset 64px on both sides, not a full-bleed border */
+/* 572:619 - the hairline is inset by the same gutter as the content, so it
+   stays with the columns instead of stretching to the screen edge */
+.footer__block::before {
+  content: "";
+  position: absolute;
+  inset-block-start: 0;
+  inset-inline: var(--page-inline);
+  height: 1px;
+  background: #404040;
+}
+
+.footer__inner {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 40px;
+}
+
+.footer__columns {
+  display: flex;
+  gap: 30px;
+}
+
+.footer__col {
+  width: 160px;
+}
+
+.footer__col ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.footer__col-title {
+  /* the frame says 13px - under the floor */
+  margin: 0 0 18px;
+  font-size: var(--type-small);
+  font-weight: 500;
+  color: var(--muted-on-dark);
+}
+
+.footer__link {
+  /* the frame says 14px - under the floor */
+  font-size: var(--type-small);
+  color: var(--paper);
+  transition: color 150ms var(--ease);
+}
+
+.footer__link:hover {
+  color: var(--accent);
+}
+
+.footer__brand {
+  width: 400px;
+  text-align: right;
+}
+
+.footer__brand-name {
+  margin: 0 0 12px;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--paper);
+}
+
+.footer__disclaimer {
+  /* the frame says 13px - under the floor */
+  margin: 0 0 8px;
+  font-size: var(--type-small);
+  line-height: 1.4;
+  color: #a6a6a6;
+}
+
+.footer__credit {
+  /* the frame says 12px - under the floor. 572:637 sits at the frame's LEFT
+     edge, which under dir=rtl is the inline END. */
+  text-align: left;
+  margin: 60px 0 0;
+  font-size: var(--type-small);
+  color: #a6a6a6;
+}
+
+/* ---------- the plain pages (no Figma design) ---------- */
+
+.plain {
+  min-height: 70vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 200px var(--page-inline) 120px;
+  background: #fcfcfc;
+}
+
+.plain__inner {
+  width: 100%;
+  max-width: 640px;
+  text-align: right;
+}
+
+.plain__title {
+  margin: 0 0 16px;
+  font-size: 48px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--ink);
+}
+
+.plain__lead {
+  margin: 0 0 32px;
+  font-size: var(--type-body);
+  line-height: 1.5;
+  color: #6b6b6b;
+}
+
+.plain__links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.plain__link {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid rgba(26, 26, 26, 0.18);
+  border-radius: 999px;
+  padding: 10px 18px;
+  font-size: var(--type-small);
+  font-weight: 500;
+  color: var(--ink);
+  transition: border-color 150ms var(--ease), color 150ms var(--ease);
+}
+
+.plain__link:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+/* ================================================================
+   Round A - under 1024.
+
+   EVERY RULE IN THIS BLOCK IS AN INVENTED MOBILE ARRANGEMENT. Figma has one
+   mobile frame in this file (340:213, a homepage strip variant) and none for
+   the Navbar, the Hero or the Footer. Elyakim's rule of 18.09 is that I
+   implement mobile from the conventions already in the build and Tal reviews
+   afterwards, so these are decisions to be ruled on, not measurements.
+   ================================================================ */
+
+@media (max-width: 1023px) {
+  /* ---------- Navbar: the four links move behind a disclosure ---------- */
+
+  .nav {
+    inset-inline: 12px;
+    top: 12px;
+  }
+
+  .nav__pill {
+    width: 100%;
+    gap: 12px;
+    justify-content: space-between;
+    padding: 10px 14px;
+    border-radius: 24px;
+    /* the sheet hangs off the bottom of the pill */
+    position: relative;
+  }
+
+  .nav__links {
+    display: none;
+  }
+
+  .nav__logo img {
+    width: 78px;
+    height: 30px;
+  }
+
+  .nav__cta {
+    min-height: 36px;
+    padding: 9px 14px;
+  }
+
+  .nav__menu {
+    display: block;
+  }
+
+  /* both controls are visible here, side by side at the left end */
+  .nav__actions {
+    gap: 8px;
+  }
+
+  /* A real <details>/<summary>: keyboard and no-JavaScript both work before
+     any of my code runs. The marker is removed on both engines. */
+  .nav__menu-button {
+    list-style: none;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 36px;
+    height: 36px;
+    border-radius: 12px;
+    border: 1px solid #bebebe;
+    cursor: pointer;
+  }
+
+  .nav__menu-button::-webkit-details-marker {
+    display: none;
+  }
+
+  .nav__menu-bars,
+  .nav__menu-bars::before,
+  .nav__menu-bars::after {
+    display: block;
+    width: 16px;
+    height: 2px;
+    background: var(--ink);
+    border-radius: 2px;
+  }
+
+  .nav__menu-bars {
+    position: relative;
+  }
+
+  .nav__menu-bars::before,
+  .nav__menu-bars::after {
+    content: "";
+    position: absolute;
+    inset-inline-start: 0;
+  }
+
+  .nav__menu-bars::before {
+    top: -5px;
+  }
+
+  .nav__menu-bars::after {
+    top: 5px;
+  }
+
+  .nav__sheet {
+    position: absolute;
+    inset-inline: 0;
+    top: calc(100% + 8px);
+    margin: 0;
+    padding: 8px;
+    list-style: none;
+    background: var(--paper);
+    border: 1px solid #bebebe;
+    border-radius: 20px;
+    box-shadow: 1px 9px 19px 0 rgba(0, 0, 0, 0.08);
+  }
+
+  .nav__sheet-link {
+    display: block;
+    padding: 12px 14px;
+    border-radius: 14px;
+    font-size: 17px;
+    font-weight: 500;
+    color: var(--ink);
+  }
+
+  .nav__sheet-link:hover {
+    background: rgba(26, 26, 26, 0.05);
+  }
+
+  /* ---------- Hero: the character goes under the copy ---------- */
+
+  .hero {
+    /* INVENTED mobile arrangement - the frame's 845 reserve is a 1440 number */
+    min-height: 0;
+    flex-direction: column;
+    align-items: stretch;
+    padding: 120px var(--edge-gutter) 64px;
+    gap: 32px;
+  }
+
+  .hero__copy {
+    min-height: 0;
+    width: 100%;
+    gap: 20px;
+  }
+
+  /* 116px is 31% of a 375px screen and the headline is two long Hebrew words
+     per line, so it scales rather than wraps into four. The floor of 40px is
+     the smallest size at which "כלכלה אישית." still holds one line at 360. */
+  .hero__title {
+    font-size: clamp(40px, 12vw, 64px);
+  }
+
+  .hero__coin {
+    width: 22px;
+    height: 22px;
+  }
+
+  .hero__blurb {
+    font-size: 17px;
+  }
+
+  .hero__action {
+    align-self: stretch;
+    align-items: stretch;
+  }
+
+  .hero .cta-primary {
+    width: 100%;
+    padding: 16px 24px;
+    font-size: 17px;
+  }
+
+  .hero__note {
+    text-align: center;
+  }
+
+  /* The character keeps the side the frame gives it - the LEFT, which under
+     dir=rtl is flex-end, not flex-start. It is not centred, because the
+     drawing is one-sided: the hand waves inward from its own edge. */
+  .hero__character {
+    align-self: flex-end;
+    width: 160px;
+    height: 196px;
+  }
+
+  .hero__hand {
+    width: 159px;
+    height: 92px;
+  }
+
+  .hero__shirt {
+    top: 87px;
+    width: 110px;
+    height: 110px;
+  }
+
+  /* ---------- Footer: the columns stack, the brand block leads ---------- */
+
+  .footer__character {
+    width: 260px;
+    height: 140px;
+    margin-inline-start: var(--edge-gutter);
+  }
+
+  .ticker__run {
+    font-size: var(--type-small);
+  }
+
+  .footer__block {
+    padding: 28px var(--edge-gutter) 20px;
+  }
+
+  .footer__block::before {
+    inset-inline: var(--edge-gutter);
+  }
+
+  /* The brand name and the disclaimer come FIRST on a phone: the three link
+     columns are secondary navigation and the disclaimer is the thing the page
+     is legally making clear. */
+  .footer__inner {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 28px;
+  }
+
+  .footer__brand {
+    width: 100%;
+  }
+
+  .footer__columns {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 24px 16px;
+  }
+
+  .footer__col {
+    width: auto;
+  }
+
+  .footer__col-title {
+    margin-bottom: 12px;
+  }
+
+  .footer__credit {
+    margin-top: 28px;
+  }
+
+  /* ---------- the plain pages ---------- */
+
+  .plain {
+    padding: 140px var(--edge-gutter) 72px;
+  }
+
+  .plain__title {
+    font-size: 34px;
+  }
+
+  .plain__lead {
+    font-size: 17px;
+  }
+}
+
+/* ================================================================
+   Round B - the single post page. Figma 535:232, read 18.09.
+   Values are the frame's unless a comment says otherwise. Every place the
+   15px floor overrides the frame is named.
+   ================================================================ */
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.post {
+  background: #fff;
+}
+
+/* ---------- editorial hero, 535:244 ---------- */
+
+.post__hero {
+  display: flex;
+  align-items: center;
+  gap: 64px;
+  /* the frame pads 80 all round; the navbar is fixed, so the top clears it.
+     Inline follows the page container, so the hero stops at 1312 like
+     everything else. */
+  padding: 160px var(--page-inline) 80px;
+}
+
+.post__hero-text {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 24px;
+  text-align: right;
+}
+
+/* 535:248. The frame hugs the two to the end, which means the stage chip's
+   width - 89px for "נולד לי ילד", 254px for a two-stage post - pushes the
+   reading time somewhere different on every post. Measured: 7 different
+   positions across nine posts. Elyakim's rule is that content length changes
+   what is inside a box and never where the box is, so the row now spans the
+   column and each element is pinned to an edge. The chip still grows; the
+   reading time no longer moves. INTERPRETATION of the frame, flagged. */
+.post__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+}
+
+/* 535:252 - the frame says 12px, under the floor */
+.post__tag {
+  border: 1px solid var(--ink-2);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+}
+
+/* 535:249 - the frame says 14px, under the floor */
+.post__reading {
+  font-size: var(--type-small);
+  color: #4d4d4d;
+  white-space: nowrap;
+}
+
+/* The title runs to one, two or three lines depending on the post, and every
+   line it gains pushed the deck and re-centred the illustration card. It now
+   reserves its tallest case, so everything below it is fixed. Measured on the
+   longest of the nine (3 lines at 1440). */
+.post__title {
+  margin: 0;
+  width: 100%;
+  font-size: 44px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: var(--ink);
+  min-height: calc(44px * 1.1 * 3);
+}
+
+.post__deck {
+  margin: 0;
+  width: 100%;
+  font-size: 22px;
+  line-height: 1.5;
+  color: #4d4d4d;
+  /* Three lines reserved. Two was not enough: one post's deck runs to three at
+     1440, which made the text column taller and pushed the vertically centred
+     illustration card 16px down on that post alone. Found by the nine-post
+     position audit, not by looking at the page. */
+  min-height: calc(22px * 1.5 * 3);
+}
+
+/* 535:245 - a 580x162 bordered card holding a 380px drawing, which the frame
+   lets overflow the card on purpose. overflow stays visible. */
+.post__hero-art {
+  flex: none;
+  width: 580px;
+  height: 162px;
+  background: var(--paper);
+  border: 1px solid #000;
+  border-radius: 25px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.post__hero-art img {
+  width: 380px;
+  height: 380px;
+  object-fit: contain;
+}
+
+.post__hairline {
+  height: 1px;
+  border: 0;
+  margin: 0;
+  background: #d9d6cf;
+}
+
+/* ---------- body, 535:257 / 535:258 ---------- */
+
+.post__body {
+  display: flex;
+  justify-content: center;
+  padding: 64px var(--page-inline) 80px;
+}
+
+/*
+ * THE READING MEASURE (Elyakim via Nir, 19.09). 760px ran to 96 characters a
+ * line with the 19px body - the actual reason the site read as hard, and
+ * raising the type on a measure that wide made it worse. 560px lands a median
+ * of 70 characters (range 59-75), inside the 60-75 band.
+ *
+ * Counted from the rendered lines by scripts/measure-cpl.mjs, which groups
+ * characters by the top of their client rect - where the browser actually
+ * broke the line. Not a ch unit and not an em conversion: Hebrew has no
+ * ascenders or descenders and its average glyph width does not match Latin, so
+ * a 65ch rule of thumb is a guess here. Re-measure if the body size changes.
+ */
+.post__column {
+  width: 560px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.post__p {
+  margin: 0;
+  font-size: var(--type-body);
+  line-height: 1.85;
+  color: var(--ink);
+  text-align: right;
+}
+
+/* the frame has no H2 style of its own inside the body; 535:260's bold 20px is
+   the nearest thing it does have, so headings use it one size up. INVENTED
+   size step, flagged - the source posts have real `##` headings and the frame's
+   abridged text has none. */
+.post__h2 {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 900;
+  line-height: 1.2;
+  color: var(--ink);
+  text-align: right;
+}
+
+/* 535:260 */
+.post__lead-in {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: right;
+}
+
+.post__rule {
+  height: 1px;
+  border: 0;
+  margin: 0;
+  background: #d9d6cf;
+}
+
+/* 535:267 */
+.post__checklist {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.post__checklist-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--ink);
+  text-align: right;
+}
+
+.post__checklist ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.post__checklist li {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  font-size: var(--type-body);
+  line-height: 1.65;
+  color: var(--ink);
+  text-align: right;
+}
+
+.post__check {
+  flex: none;
+  font-weight: 700;
+  color: var(--ink-2);
+}
+
+/* 535:278 */
+.post__tip {
+  display: flex;
+  gap: 14px;
+  align-items: flex-start;
+  background: var(--paper);
+  border: 1.5px solid var(--accent);
+  border-radius: 20px;
+  padding: 24px;
+}
+
+.post__tip p {
+  margin: 0;
+  flex: 1 1 0;
+  min-width: 0;
+  font-size: var(--type-small);
+  line-height: 1.5;
+  color: var(--ink);
+  text-align: right;
+}
+
+.post__tip-mark {
+  flex: none;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--accent);
+}
+
+/* ---------- recommended, 535:500 ---------- */
+
+.post__recommended {
+  background: var(--paper);
+  border-top: 1px solid #d9d6cf;
+  /* the band is full-bleed; its contents are not */
+  padding: 100px var(--page-inline);
+  display: flex;
+  flex-direction: column;
+  gap: 40px;
+}
+
+.post__recommended-title {
+  margin: 0;
+  font-size: 32px;
+  font-weight: 900;
+  color: var(--ink-2);
+  text-align: right;
+}
+
+.post__tiles {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.post__tile {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 32px;
+  transition: transform 200ms var(--ease), box-shadow 200ms var(--ease);
+}
+
+/* INVENTED: the frame has no hover state for a tile. */
+.post__tile:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+}
+
+.post__tile-text {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 8px;
+  text-align: right;
+}
+
+/* 535:505 - the frame says 11px, well under the floor */
+.post__chip {
+  background: #cde6a1;
+  border-radius: 6px;
+  padding: 4px 12px;
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.post__tile-title {
+  font-size: 20px;
+  font-weight: 800;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+/* 535:508 - the frame says 13px, under the floor */
+.post__tile-reading {
+  font-size: var(--type-small);
+  color: #4d4d4d;
+}
+
+.post__tile-img {
+  flex: none;
+  width: 140px;
+  height: 100px;
+  border-radius: 8px;
+  object-fit: cover;
+}
+
+/* ---------- newsletter + closing CTA, 530:462 / 530:470 ---------- */
+
+.post__body--closing .post__column {
+  gap: 40px;
+}
+
+.newsletter {
+  background: var(--ink-2);
+  border-radius: 28px;
+  padding: 40px 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+.newsletter__title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  color: #fff;
+}
+
+.newsletter__sub {
+  margin: 0;
+  font-size: var(--type-small);
+  color: #bfbfbf;
+}
+
+.newsletter__form {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: #fff;
+  border-radius: 999px;
+  padding: 4px;
+}
+
+.newsletter__submit {
+  border: 0;
+  cursor: pointer;
+  background: var(--accent);
+  border-radius: 999px;
+  padding: 12px 24px;
+  font: inherit;
+  font-size: var(--type-small);
+  font-weight: 800;
+  color: #fff;
+}
+
+.newsletter__field {
+  display: block;
+  width: 240px;
+}
+
+.newsletter__field input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 12px 20px;
+  font: inherit;
+  /* the frame's placeholder is 14px, under the floor */
+  font-size: var(--type-small);
+  color: var(--ink);
+  text-align: right;
+}
+
+.newsletter__field input::placeholder {
+  color: var(--muted);
+}
+
+.newsletter__field input:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 999px;
+}
+
+/* INVENTED - the frame has no such line. It exists because the form is not
+   wired to anything yet and a form that silently does nothing is worse. */
+.newsletter__pending {
+  margin: 0;
+  font-size: var(--type-small);
+  color: var(--muted-on-dark);
+}
+
+.post__cta {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+}
+
+.post__cta-line {
+  margin: 0;
+  font-size: var(--type-small);
+  color: #4d4d4d;
+  text-align: center;
+}
+
+.post__cta-button {
+  display: inline-flex;
+  background: var(--ink-2);
+  border-radius: 999px;
+  padding: 16px 40px;
+  font-size: 18px;
+  font-weight: 800;
+  color: #fff;
+  transition: background 150ms var(--ease);
+}
+
+.post__cta-button:hover {
+  background: #000;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame for this page ---------- */
+
+@media (max-width: 1023px) {
+  .post__hero {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 24px;
+    padding: 110px var(--edge-gutter) 40px;
+  }
+
+  /* The illustration card leads on a phone: it is the thing that says which
+     post this is before the title is read. The 380px drawing no longer
+     overflows a 162px card at this width - it would cover the title - so the
+     card grows and the art is contained. */
+  .post__hero-text {
+    order: 2;
+  }
+
+  .post__hero-art {
+    order: 1;
+    width: 100%;
+    height: 200px;
+    border-radius: 20px;
+    overflow: hidden;
+  }
+
+  .post__hero-art img {
+    width: 200px;
+    height: 200px;
+  }
+
+  /* Same chip, same problem, same ruling as the blog card: at 336px a
+     two-stage chip ("רוצה לעשות סדר בכסף · צריך סכום כסף", 254px) plus the
+     reading time does not fit. It WRAPS rather than truncating - the second
+     life stage is half the meaning and must not disappear. The row wraps with
+     it, so the reading time keeps its own line if it needs one. */
+  /* The template is a spec: an element's position may not depend on how long
+     its neighbour's text is. Wrapping the chip made the row 34px taller on the
+     three posts with two life stages, which moved their title and deck; giving
+     the row a min-height fixed that, but the reading time itself still sat
+     beside the chip on six posts and below it on three.
+
+     So the arrangement is deterministic instead of content-dependent: at this
+     width the chip always takes the first line and the reading time always
+     takes the second, on every post. Six posts gain a line they would not
+     strictly need, which is the price of a template that does not move. */
+  .post__meta {
+    flex-direction: column;
+    align-items: flex-start;
+    row-gap: 8px;
+  }
+
+  .post__tag {
+    min-width: 0;
+    flex: 0 1 auto;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+
+  .post__reading {
+    flex: none;
+  }
+
+  .post__title {
+    font-size: 30px;
+    /* four lines at this width is the tallest of the nine */
+    min-height: calc(30px * 1.1 * 4);
+  }
+
+  .post__deck {
+    font-size: 17px;
+    min-height: calc(17px * 1.5 * 3);
+  }
+
+  .post__body {
+    padding: 40px var(--edge-gutter) 56px;
+  }
+
+  /* The measure, not the width, is the thing being held. Body is 18px in this
+     band rather than the desktop 19px, so 510px rather than 560px: it lands a
+     median of 66 characters, inside 60-75. Phones keep max-width:100% and are
+     narrower than this anyway - they measure 41-44 characters, below the band
+     and not fixable at that viewport. Measured with scripts/measure-cpl.mjs. */
+  .post__column {
+    width: 510px;
+    gap: 28px;
+  }
+
+  /* Nir, 19.09: Elyakim's legibility complaint was not desktop-only. 18px
+     rather than the desktop 19px because the phone loses about a word a line
+     per step and 18 keeps the rhythm. Line length is not the constraint on a
+     phone - the measure is already below the 60-75 band at any type size that
+     is readable - so legibility wins here. */
+  .post__p {
+    font-size: 18px;
+  }
+
+  .post__h2 {
+    font-size: 22px;
+  }
+
+  .post__lead-in,
+  .post__checklist-title {
+    font-size: 18px;
+  }
+
+  .post__recommended {
+    padding: 56px var(--edge-gutter);
+    gap: 24px;
+  }
+
+  .post__recommended-title {
+    font-size: 24px;
+  }
+
+  /* the tile's picture goes above its text rather than shrinking to a stamp */
+  .post__tile {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    gap: 16px;
+    padding: 16px;
+  }
+
+  .post__tile-img {
+    width: 100%;
+    height: 140px;
+  }
+
+  .post__tile-title {
+    font-size: 18px;
+  }
+
+  .newsletter {
+    padding: 28px 20px;
+    border-radius: 24px;
+  }
+
+  .newsletter__title {
+    font-size: 22px;
+  }
+
+  /* the pill cannot hold a 240px field and a button side by side at 375 */
+  .newsletter__form {
+    flex-direction: column;
+    align-items: stretch;
+    width: 100%;
+    border-radius: 24px;
+    padding: 8px;
+    gap: 8px;
+  }
+
+  .newsletter__field {
+    width: 100%;
+    order: -1;
+  }
+
+  .newsletter__submit {
+    width: 100%;
+  }
+
+  .post__cta-button {
+    width: 100%;
+    justify-content: center;
+    text-align: center;
+  }
+}
+
+/* ================================================================
+   Round B - blog index. Figma 536:591, read 18.09.
+   ================================================================ */
+
+.blog {
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 64px;
+  /* the frame pads 40 inline; the top clears the fixed navbar */
+  padding-block: 150px 80px;
+  padding-inline: var(--page-inline);
+}
+
+.blog__title {
+  margin: 0;
+  font-size: 72px;
+  font-weight: 900;
+  line-height: 1;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+/* At 1024 the two tabs (272px) and the seven filters (~770px) need more than
+   the 896px of content box available, and the row neither wrapped nor
+   clamped - 99px of page overflow. It wraps now, so the filters drop to their
+   own line between about 1024 and 1200 and the row is intact again at 1280.
+   Found at 1024, which is between the breakpoints the old sweep sampled. */
+.blog__toolbar {
+  width: 100%;
+  max-width: var(--content-max);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px 24px;
+}
+
+.blog__filters {
+  flex-wrap: wrap;
+  row-gap: 12px;
+}
+
+/* 601:524 - the frame says 14px, under the floor */
+.blog__tabs {
+  display: flex;
+  gap: 8px;
+}
+
+.blog__tab {
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--type-small);
+  font-weight: 700;
+  background: #fff;
+  color: var(--ink);
+  border: 1px solid #d9d6cf;
+  border-radius: 999px;
+  padding: 10px 20px;
+  white-space: nowrap;
+  transition: background 150ms var(--ease), color 150ms var(--ease);
+}
+
+.blog__tab.is-active {
+  background: var(--ink-2);
+  border-color: var(--ink-2);
+  color: #fff;
+}
+
+/* 601:353 - the frame says 12px, under the floor */
+.blog__filters {
+  display: flex;
+  align-items: center;
+  gap: 26px;
+}
+
+.blog__filter {
+  cursor: pointer;
+  font: inherit;
+  background: none;
+  border: 0;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  color: var(--muted);
+  transition: color 150ms var(--ease);
+}
+
+/* The icon: normal state paints the exported two-tone artwork as a
+   background; the active state paints the accent THROUGH the same file used
+   as a mask, so the whole glyph turns orange (601:515) without needing a
+   second export. --icon is set per item by the component. */
+.blog__filter-icon {
+  display: block;
+  width: 32px;
+  height: 32px;
+  background: var(--icon) center / contain no-repeat;
+}
+
+.blog__filter.is-active .blog__filter-icon {
+  background: var(--accent);
+  -webkit-mask: var(--icon) center / contain no-repeat;
+  mask: var(--icon) center / contain no-repeat;
+}
+
+.blog__filter-label {
+  font-size: var(--type-small);
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+/* 601:515 / 601:516 - the active filter is accent with a rule under it */
+.blog__filter.is-active {
+  color: var(--accent);
+  position: relative;
+}
+
+.blog__filter.is-active::after {
+  content: "";
+  position: absolute;
+  inset-inline: 0;
+  bottom: -4px;
+  height: 1px;
+  background: var(--accent);
+}
+
+/* ---------- featured card, 539:379 ---------- */
+
+.blog__featured-wrap {
+  width: 100%;
+  max-width: var(--content-max);
+}
+
+.blog__featured {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  background: var(--paper);
+  border: 1.5px solid #e4ddcf;
+  border-radius: 20px;
+  padding: 20px;
+  transition: border-color 200ms var(--ease);
+}
+
+.blog__featured:hover {
+  border-color: var(--accent);
+}
+
+/* dir=rtl: the first child is at the RIGHT, and the frame has the text on the
+   right and the picture on the left. */
+.blog__featured-content {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 20px;
+  padding: 40px;
+  text-align: right;
+}
+
+.blog__featured-img {
+  flex: none;
+  width: 560px;
+  height: 330px;
+  border-radius: 20px;
+  object-fit: contain;
+}
+
+/* 530:1447 / 536:690 - the frame says 12px, under the floor */
+.blog__tag {
+  align-self: flex-start;
+  background: #fff;
+  border: 1px solid var(--ink-2);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+.blog__featured-title {
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: var(--ink-2);
+}
+
+.blog__featured-excerpt {
+  font-size: var(--type-body);
+  line-height: 1.4;
+  color: var(--ink-2);
+}
+
+.blog__featured-footer {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+}
+
+/* 539:387 - the frame says 13px, under the floor */
+.blog__featured-reading {
+  font-size: var(--type-small);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* 530:1373 */
+.blog__featured-cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink-2);
+  border: 1px solid var(--ink-2);
+  border-radius: 14px;
+  padding: 9px 17px;
+  font-size: var(--type-small);
+  font-weight: 700;
+  line-height: 1.2;
+  color: #fff;
+  white-space: nowrap;
+}
+
+/* ---------- the card grid, 536:688 ---------- */
+
+.blog__grid {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+}
+
+/* A flex item will not shrink below its content unless it is told to: the
+   card's 29px title is a long unbreakable Hebrew string, so the card sized to
+   451px inside a 335px column and pushed the whole page sideways at 360-390.
+   `min-width: 0` on both the item and the card is the fix, and it is the first
+   thing to reach for whenever a flex or grid child refuses to shrink. */
+.blog__grid > li {
+  display: flex;
+  min-width: 0;
+}
+
+.blog__card {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 260px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 12px;
+  background: var(--paper);
+  border: 1.5px solid #e4ddcf;
+  border-radius: 20px;
+  padding: 20px;
+  text-align: right;
+  transition: border-color 200ms var(--ease), transform 200ms var(--ease);
+}
+
+.blog__card:hover {
+  border-color: var(--accent);
+  transform: translateY(-2px);
+}
+
+.blog__card-top,
+.blog__card-bottom {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+
+.blog__card-meta {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 536:692 - the frame's "H3 - כותרת כרטיס" style */
+/* long Hebrew titles have no break opportunity of their own */
+.blog__card-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 29px;
+  font-weight: 800;
+  line-height: 1;
+  letter-spacing: -1.16px;
+  color: var(--ink-2);
+}
+
+.blog__card-excerpt {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--type-body);
+  line-height: 1.4;
+  color: var(--ink-2);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.blog__card-spacer {
+  flex: 1 1 auto;
+}
+
+/* 536:696 - the frame says 11px, well under the floor */
+.blog__reading-pill {
+  background: var(--paper);
+  border-radius: 999px;
+  padding: 6px 12px;
+  font-size: var(--type-small);
+  font-weight: 500;
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* 536:698 - the frame says 13px for the glyph, under the floor */
+/* ---------- the honest empty state (INVENTED - no frame for it) ---------- */
+
+.blog__empty {
+  width: 100%;
+  max-width: var(--content-max);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  padding: 80px 20px;
+  background: var(--paper);
+  border: 1.5px dashed #e4ddcf;
+  border-radius: 20px;
+  text-align: center;
+}
+
+.blog__empty p {
+  margin: 0;
+  font-size: var(--type-body);
+  color: var(--ink);
+}
+
+.blog__empty-reset {
+  cursor: pointer;
+  font: inherit;
+  font-size: var(--type-small);
+  font-weight: 700;
+  background: var(--ink-2);
+  color: #fff;
+  border: 0;
+  border-radius: 999px;
+  padding: 12px 24px;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame for this page ---------- */
+
+@media (max-width: 1023px) {
+  .blog {
+    gap: 32px;
+    padding: 110px var(--edge-gutter) 56px;
+  }
+
+  .blog__title {
+    font-size: 36px;
+  }
+
+  /* the toolbar stacks and both rows become their own scrollers, with the
+     same full-bleed gutter treatment as every other scroller in this build */
+  .blog__toolbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 16px;
+  }
+
+  .blog__tabs,
+  .blog__filters {
+    width: calc(100% + var(--edge-gutter) * 2);
+    margin-inline: calc(var(--edge-gutter) * -1);
+    padding-inline: var(--edge-gutter);
+    scroll-padding-inline: var(--edge-gutter);
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .blog__tabs::-webkit-scrollbar,
+  .blog__filters::-webkit-scrollbar {
+    display: none;
+  }
+
+  .blog__tab,
+  .blog__filter {
+    flex: none;
+  }
+
+  .blog__filters {
+    gap: 18px;
+  }
+
+  /* the featured card becomes a column, picture first */
+  .blog__featured {
+    flex-direction: column-reverse;
+    align-items: stretch;
+    padding: 12px;
+  }
+
+  .blog__featured-img {
+    width: 100%;
+    height: 180px;
+  }
+
+  .blog__featured-content {
+    padding: 16px 8px 8px;
+    gap: 14px;
+  }
+
+  .blog__featured-title {
+    font-size: 24px;
+  }
+
+  .blog__featured-footer {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 12px;
+  }
+
+  .blog__featured-cta {
+    justify-content: center;
+    padding: 14px 17px;
+  }
+
+  .blog__grid {
+    grid-template-columns: 1fr;
+  }
+
+  .blog__card {
+    min-height: 0;
+  }
+
+  .blog__card-title {
+    font-size: 22px;
+    letter-spacing: -0.6px;
+  }
+
+  /* A post with two life stages makes the chip 254px, and 254 plus the
+     reading pill does not fit a 335px card.
+
+     My first fix truncated it, and that was wrong: the chip reads
+     "נולד לי ילד · מתחילים להשקיע" and the ellipsis landed one character into
+     the second stage, so the second life stage was not shortened, it was
+     gone - half the chip's meaning, silently. Elyakim's ruling, and it is the
+     right one: the chip WRAPS. Both stages stay readable, the "·" stays as the
+     separator, the chip's box grows and the card absorbs it the way it already
+     absorbs a two-line title.
+
+     Truncation is only ever acceptable on a label whose tail carries no
+     meaning. This one's tail is half the meaning. */
+  .blog__card-meta,
+  .blog__card-top {
+    min-width: 0;
+    /* the meta row itself wraps too, so a tall chip and the pill can sit on
+       separate lines rather than fighting for one */
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  .blog__tag {
+    min-width: 0;
+    flex: 0 1 auto;
+    white-space: normal;
+    /* the separator is the natural break point; anywhere is the fallback for a
+       single stage whose own name is longer than the card */
+    overflow-wrap: anywhere;
+    text-align: center;
+  }
+
+  .blog__reading-pill {
+    flex: none;
+  }
+}
+
+/* ================================================================
+   Round B - the contact form and its modal.
+   INVENTED THROUGHOUT: no Figma frame draws a modal or this form. The shapes
+   are borrowed from components the frames DO define (the 14px-radius CTA, the
+   20px card radius, the paper background) so it sits inside the same system.
+   ================================================================ */
+
+.footer__credit-link {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  transition: color 150ms var(--ease);
+}
+
+.footer__credit-link:hover {
+  color: var(--accent);
+}
+
+.contact {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  text-align: right;
+}
+
+.contact__row {
+  display: flex;
+  gap: 16px;
+}
+
+.contact__row > .contact__field {
+  flex: 1 1 0;
+  min-width: 0;
+}
+
+.contact__field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.contact__label {
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: var(--ink);
+}
+
+.contact__field input,
+.contact__field textarea {
+  font: inherit;
+  font-size: var(--type-body);
+  color: var(--ink);
+  background: #fff;
+  border: 1px solid #d9d6cf;
+  border-radius: 14px;
+  padding: 12px 14px;
+  text-align: right;
+  resize: vertical;
+}
+
+.contact__field input:focus-visible,
+.contact__field textarea:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.contact__field [aria-invalid="true"] {
+  border-color: var(--accent);
+}
+
+.contact__error {
+  font-size: var(--type-small);
+  color: var(--accent);
+}
+
+.contact__submit {
+  cursor: pointer;
+  font: inherit;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  background: var(--ink-2);
+  color: #fff;
+  border: 0;
+  border-radius: 14px;
+  padding: 18px 32px;
+  transition: background 150ms var(--ease);
+}
+
+.contact__submit:hover {
+  background: #000;
+}
+
+.contact__submit[disabled] {
+  opacity: 0.7;
+  cursor: default;
+}
+
+/* the send-state line. It is present but empty until there is something to
+   say, so nothing jumps when it appears. */
+.contact__summary {
+  margin: 0;
+  min-height: 0;
+  font-size: var(--type-small);
+  line-height: 1.5;
+  color: var(--ink);
+}
+
+.contact__summary.is-shown {
+  background: var(--paper);
+  border: 1.5px solid var(--accent);
+  border-radius: 14px;
+  padding: 12px 14px;
+}
+
+.contact__summary:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ---------- the modal ---------- */
+
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(11, 11, 11, 0.45);
+}
+
+.modal__panel {
+  width: 100%;
+  max-width: 560px;
+  max-height: calc(100vh - 48px);
+  overflow-y: auto;
+  background: #fff;
+  border-radius: 24px;
+  padding: 28px;
+  box-shadow: 0 30px 80px rgba(0, 0, 0, 0.25);
+}
+
+.modal__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
+}
+
+.modal__title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 900;
+  color: var(--ink);
+}
+
+.modal__close {
+  cursor: pointer;
+  font: inherit;
+  font-size: 24px;
+  line-height: 1;
+  width: 40px;
+  height: 40px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--paper);
+  color: var(--ink);
+  border: 1px solid #d9d6cf;
+  border-radius: 999px;
+}
+
+.modal__close:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.plain__inner--form {
+  max-width: 560px;
+}
+
+.plain__inner--form .contact {
+  margin-top: 24px;
+}
+
+@media (max-width: 1023px) {
+  /* a sheet on a phone: it meets the bottom edge and scrolls inside itself */
+  .modal {
+    padding: 0;
+    align-items: flex-end;
+  }
+
+  .modal__panel {
+    max-width: none;
+    /* dvh with vh as the fallback. On a real phone the address bar makes vh
+       resolve against something taller than the visible area, so a vh-sized
+       sheet can put its submit button under the chrome. NOT verified on a real
+       device - see the note in scripts/check-mechanics.mjs about what mobile
+       emulation reports here. */
+    max-height: 90vh;
+    max-height: 85dvh;
+    border-radius: 24px 24px 0 0;
+    padding: 20px var(--edge-gutter) 28px;
+  }
+
+  .modal__title {
+    font-size: 22px;
+  }
+
+  .contact__row {
+    flex-direction: column;
+    gap: 16px;
+  }
+}
+
+
+/* ================================================================
+   Life stages - the step exchange (Elyakim, 18.09)
+   The old content leaves, the new content arrives. Out is shorter than in, so
+   the hand-off reads as "that one left, this one came" rather than as a
+   dissolve. 110ms out + 150ms in = 260ms, inside the 200-320ms asked for and
+   tuned by watching it at 100vh per step.
+
+   The offset is 10px and it is TRANSFORM only - never a margin or a top - so
+   the exchange cannot move anything around it.
+   ================================================================ */
+
+/* the staged entrance - see STAGGER in LifeStagesScroll.tsx. --ls-delay is 0
+   unless a caller sets it, and it is applied on the IN phase only. */
+.ls__swap {
+  --ls-delay: 0ms;
+  transition: opacity 260ms var(--ease), transform 260ms var(--ease);
+  transition-delay: var(--ls-delay);
+}
+
+/* heading, paragraph, CTA - the cards carry their own delay inline */
+.ls__title.ls__swap { --ls-delay: 0ms; }
+.ls__blurb.ls__swap { --ls-delay: 130ms; }
+.ls__cta.ls__swap { --ls-delay: 260ms; }
+
+.ls__swap.is-out {
+  opacity: 0;
+  transform: translateY(-10px);
+  /* leaving is faster than arriving */
+  transition-duration: 110ms;
+  /* and simultaneous: a staggered exit is what leaves a ghost when the reader
+     crosses two steps quickly */
+  transition-delay: 0ms;
+  /* a leaving element must not eat a click meant for the arriving one */
+  pointer-events: none;
+}
+
+.ls__swap.is-in {
+  opacity: 1;
+  transform: none;
+}
+
+/* The heading and the paragraph hold their height across the swap, so nothing
+   below them moves while the words change. Measured on the longest station
+   title (station 8 wraps to two lines) and the longest blurb. */
+.ls__title {
+  min-height: calc(57px * 0.8 * 2);
+}
+
+.ls__blurb {
+  min-height: calc(17px * 1.4 * 3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ls__swap,
+  .ls__swap.is-out,
+  .ls__swap.is-in {
+    transition: none;
+    /* the stagger must not survive as a delay on nothing */
+    transition-delay: 0ms;
+    --ls-delay: 0ms;
+    opacity: 1;
+    transform: none;
+    pointer-events: auto;
+  }
+}
+
+@media (max-width: 1023px) {
+  .ls__title {
+    min-height: calc(30px * 1 * 2);
+  }
+
+  .ls__blurb {
+    min-height: calc(15px * 1.4 * 3);
+  }
+}
+
+
+/* <picture> is an inline wrapper the layout never asked for; it must not
+   become a box of its own between a flex parent and the image. */
+picture {
+  display: contents;
+}
+
+
+/* ================================================================
+   הסיפור שלי - Figma 407:315, read 18.09
+   ================================================================ */
+
+.story {
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  /* the frame pads 70/100; the top also clears the fixed navbar */
+  padding: 170px var(--page-inline) 100px;
+}
+
+/* 440:218 */
+.story__title {
+  margin: 0;
+  max-width: 407px;
+  font-size: 56px;
+  font-weight: 900;
+  line-height: 1.55;
+  color: var(--ink);
+  text-align: center;
+}
+
+/* 599:571 - 1178 wide inside the 1312 container */
+.story__row {
+  width: 100%;
+  max-width: 1178px;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 40px;
+}
+
+/* 599:575 */
+/* The frame's 680px column plus the 380px figure and the 40px gap need
+   1100px, and at 1024 the content box is 896 - the figure sat entirely off the
+   viewport at left:-140px. The column shrinks instead of the row overflowing;
+   it is still 680 wherever there is room for 680. */
+.story__content {
+  flex: 1 1 680px;
+  min-width: 0;
+  width: 680px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  text-align: right;
+}
+
+/* the frame's four text blocks; inside a block the paragraphs run on at the
+   leading, between blocks there is the 26px gap */
+.story__block p {
+  margin: 0;
+  font-size: var(--type-body);
+  line-height: 1.7;
+  color: var(--ink);
+}
+
+/* 599:572 - the panel and the figure are stacked, and the figure is taller
+   than the panel on purpose */
+.story__figure {
+  position: relative;
+  flex: none;
+  width: 380px;
+  height: 425px;
+}
+
+.story__panel {
+  position: absolute;
+  inset: 0;
+  background: #ede8de;
+  border-radius: 28px;
+}
+
+.story__illustration {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 39px;
+  width: 380px;
+  height: 772px;
+  object-fit: contain;
+  object-position: top;
+}
+
+/* 440:250 */
+.story__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink-2);
+  color: #fff;
+  border-radius: 999px;
+  padding: 16px 40px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.55;
+  transition: background 150ms var(--ease);
+}
+
+.story__cta:hover {
+  background: #000;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame for this page ---------- */
+
+@media (max-width: 1023px) {
+  .story {
+    gap: 28px;
+    padding: 110px var(--edge-gutter) 64px;
+  }
+
+  .story__title {
+    font-size: 32px;
+    line-height: 1.2;
+  }
+
+  /* The figure leads on a phone - it is the thing that says whose story this
+     is - and the column follows. The panel shrinks with it and the figure
+     still breaks out of the bottom, which is the frame's composition. */
+  .story__row {
+    flex-direction: column;
+    align-items: center;
+    gap: 24px;
+  }
+
+  .story__figure {
+    order: -1;
+    width: 260px;
+    height: 300px;
+  }
+
+  .story__illustration {
+    width: 260px;
+    height: 528px;
+    top: 27px;
+  }
+
+  .story__content {
+    width: 100%;
+    gap: 22px;
+  }
+
+  .story__block p {
+    font-size: 16px;
+  }
+
+  .story__cta {
+    width: 100%;
+    text-align: center;
+  }
+}
+
+
+/* ================================================================
+   ארגז הכלים - Figma 407:364, read 18.09
+   ================================================================ */
+
+.toolbox {
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 56px;
+  padding: 190px var(--page-inline) 110px;
+}
+
+.toolbox__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 16px;
+  text-align: center;
+}
+
+/* 440:254 */
+.toolbox__title {
+  margin: 0;
+  font-size: 64px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: var(--ink);
+}
+
+/* 440:255 */
+.toolbox__subtitle {
+  margin: 0;
+  max-width: 680px;
+  font-size: var(--type-body);
+  color: #4d4d4d;
+}
+
+/* 440:256 */
+.toolbox__intro {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.toolbox__intro p {
+  margin: 0;
+  max-width: 680px;
+  font-size: var(--type-body);
+  color: var(--ink);
+}
+
+/* 440:259 - three cards, the frame's own widths */
+.toolbox__cards {
+  width: 100%;
+  max-width: var(--content-max);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 34px;
+  align-items: stretch;
+}
+
+.toolbox__card-wrap {
+  display: flex;
+}
+
+.toolbox__card-wrap > * {
+  flex: 1 1 auto;
+}
+
+/* 440:260 - a 5px black border is the card's whole identity here */
+.tool {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 14px;
+  background: #fff;
+  border: 5px solid var(--ink-2);
+  border-radius: 24px;
+  padding: 28px 26px;
+  text-align: right;
+  list-style: none;
+}
+
+/* 440:261 */
+.tool__art {
+  display: block;
+  height: 252px;
+  align-self: center;
+}
+
+.tool__art img {
+  height: 252px;
+  width: auto;
+  object-fit: contain;
+}
+
+/* 440:262 */
+.tool__title {
+  margin: 0;
+  width: 100%;
+  font-size: 40px;
+  font-weight: 900;
+  line-height: 1.05;
+  color: var(--ink);
+}
+
+/* 440:263 - the frame says 14px, under the floor */
+.tool__desc {
+  margin: 0;
+  width: 100%;
+  font-size: var(--type-small);
+  line-height: 1.45;
+  color: #4d4d4d;
+}
+
+/* 440:264 - the frame's own "Button - כפתור" style at the card's size */
+.tool__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font: inherit;
+  cursor: pointer;
+  border: 0;
+  background: var(--ink-2);
+  color: #fff;
+  border-radius: 14px;
+  padding: 10px 20px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.2;
+  transition: background 150ms var(--ease);
+}
+
+.tool__cta:hover {
+  background: #000;
+}
+
+/* INVENTED - the frame has no such line. It exists because no tool file
+   exists yet and a button that silently does nothing is worse. */
+.tool__pending {
+  margin: 0;
+  width: 100%;
+  font-size: var(--type-small);
+  color: var(--accent);
+}
+
+/* 440:266 */
+.tool__facts {
+  width: 100%;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  gap: 24px;
+  /* the row keeps its height whether a value exists or not, so filling the
+     gaps later cannot move anything below it */
+  min-height: 42px;
+}
+
+.tool__facts li {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+/* 440:268 - the frame says 12px, under the floor */
+.tool__fact-label {
+  font-size: var(--type-small);
+  font-weight: 700;
+  /* was #999 - 2.85:1 on white. Same role as --muted, so same token. */
+  color: var(--muted);
+}
+
+/* 440:269 - the frame says 14px, under the floor */
+.tool__fact-value {
+  font-size: var(--type-small);
+  color: var(--ink);
+}
+
+.tool__fact-value.is-missing {
+  color: #bfbfbf;
+}
+
+/* 440:273 - the frame says 14px, under the floor. Pushed to the bottom so the
+   cards' footers line up however tall their descriptions are. */
+.tool__deeper {
+  margin: auto 0 0;
+  width: 100%;
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: var(--ink);
+  text-align: center;
+}
+
+/* 440:302 */
+.toolbox__missing-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.toolbox__missing {
+  width: 100%;
+  max-width: 900px;
+  background: var(--paper);
+  border-radius: 28px;
+  padding: 48px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+.toolbox__missing-title {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 800;
+  color: var(--ink);
+}
+
+.toolbox__missing-body {
+  margin: 0;
+  max-width: 700px;
+  font-size: var(--type-small);
+  color: #4d4d4d;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame for this page ---------- */
+
+@media (max-width: 1023px) {
+  .toolbox {
+    gap: 32px;
+    padding: 110px var(--edge-gutter) 64px;
+  }
+
+  .toolbox__title {
+    font-size: 38px;
+  }
+
+  .toolbox__subtitle {
+    font-size: 17px;
+  }
+
+  /* three 392px cards do not fit; they stack rather than shrinking into
+     unreadable columns, which is the same call as the post cards */
+  .toolbox__cards {
+    grid-template-columns: 1fr;
+    gap: 20px;
+  }
+
+  .tool {
+    border-width: 4px;
+    padding: 20px 18px;
+  }
+
+  .tool__title {
+    font-size: 30px;
+  }
+
+  .tool__art,
+  .tool__art img {
+    height: 200px;
+  }
+
+  .tool__cta {
+    width: 100%;
+  }
+
+  .toolbox__missing {
+    padding: 28px 20px;
+    border-radius: 24px;
+  }
+
+  .toolbox__missing-title {
+    font-size: 22px;
+  }
+}
+
+
+/* ================================================================
+   ליווי אישי - Figma 407:413, read 18.09
+   ================================================================ */
+
+.guidance {
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 36px;
+  padding: 200px var(--page-inline) 130px;
+}
+
+/* 448:218 */
+.guidance__title {
+  margin: 0;
+  max-width: 610px;
+  font-size: 52px;
+  font-weight: 900;
+  line-height: 1.55;
+  color: var(--ink);
+  text-align: center;
+}
+
+/* 448:219 */
+.guidance__intro {
+  width: 100%;
+  max-width: 680px;
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+  text-align: right;
+}
+
+.guidance__intro p {
+  margin: 0;
+  font-size: var(--type-body);
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+/* 448:222 - a definition list, because that is what it is */
+.guidance__facts-wrap {
+  width: 100%;
+  display: flex;
+  justify-content: center;
+}
+
+.guidance__facts {
+  width: 100%;
+  max-width: 680px;
+  margin: 0;
+  padding: 8px 0;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+/* dir=rtl puts the first child at the RIGHT, which is where the frame has the
+   bold label; the value sits to its left. */
+.guidance__fact {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+  text-align: right;
+}
+
+.guidance__fact dt {
+  flex: none;
+  width: 140px;
+  font-size: var(--type-body);
+  font-weight: 700;
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+.guidance__fact dd {
+  flex: 1 1 auto;
+  margin: 0;
+  font-size: var(--type-body);
+  line-height: 1.55;
+  color: var(--ink);
+}
+
+/* 448:232 */
+.guidance__guarantee {
+  margin: 0;
+  max-width: 680px;
+  font-size: var(--type-body);
+  line-height: 1.55;
+  color: #4d4d4d;
+  text-align: center;
+}
+
+/* 448:233 */
+.guidance__cta {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink-2);
+  color: #fff;
+  border-radius: 999px;
+  padding: 16px 44px;
+  font-size: 18px;
+  font-weight: 800;
+  line-height: 1.55;
+  transition: background 150ms var(--ease);
+}
+
+.guidance__cta:hover {
+  background: #000;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame for this page ---------- */
+
+@media (max-width: 1023px) {
+  .guidance {
+    gap: 24px;
+    padding: 110px var(--edge-gutter) 64px;
+  }
+
+  .guidance__title {
+    font-size: 30px;
+    line-height: 1.25;
+  }
+
+  .guidance__intro p,
+  .guidance__guarantee {
+    font-size: 16px;
+  }
+
+  /* 140px of label plus a long value does not work at 335px, so the label
+     sits above its value instead of beside it */
+  .guidance__fact {
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .guidance__fact dt {
+    width: auto;
+    color: var(--muted);
+  }
+
+  .guidance__cta {
+    width: 100%;
+  }
+}
+
+
+/* ================================================================
+   404 - Figma 522:217 / 601:716, read 18.09
+   The rotations are the design, not decoration: the scrap is -2deg, the button
+   +3deg, the character +7deg. All of them are transforms, so none of them can
+   push anything around.
+   ================================================================ */
+
+.e404 {
+  background: #fff;
+  display: flex;
+  justify-content: center;
+  padding: 190px var(--page-inline) 120px;
+  /* The character is deliberately larger than its box and pokes out to the
+     left, which is the frame's composition. `clip` keeps that without making
+     the page horizontally scrollable - `hidden` would create a scroll
+     container and `visible` gives the whole document a scrollbar. */
+  overflow-x: clip;
+}
+
+.e404__inner {
+  width: 100%;
+  max-width: 1241px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* dir=rtl puts the first child at the RIGHT. The frame has the character on
+   the right and the paper scrap on the left, so the ART comes first. */
+.e404__art {
+  flex: none;
+  width: 698px;
+  height: 719px;
+  position: relative;
+}
+
+.e404__art img {
+  position: absolute;
+  inset-inline-start: -166px;
+  top: -171px;
+  width: 920px;
+  height: 956px;
+  transform: rotate(7deg);
+  object-fit: contain;
+}
+
+.e404__scrap {
+  position: relative;
+  flex: none;
+  width: 649px;
+  height: 316px;
+  /* the frame overlaps the two by 106px */
+  margin-inline-end: -106px;
+  z-index: 1;
+}
+
+/* 522:241 */
+.e404__frame {
+  position: absolute;
+  inset-inline-start: 0;
+  top: 11px;
+  width: 640px;
+  height: 260px;
+  border: 2px dashed #fcaf18;
+  border-radius: 4px;
+  transform: rotate(-2deg);
+}
+
+/* 522:242 */
+.e404__text {
+  position: absolute;
+  inset-inline-start: 40px;
+  top: 72px;
+  width: 560px;
+  margin: 0;
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1.4;
+  color: var(--ink);
+  text-align: right;
+}
+
+/* 522:243 */
+.e404__cta {
+  position: absolute;
+  inset-inline-start: 157px;
+  top: 252px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--ink-2);
+  color: #fff;
+  border-radius: 999px;
+  padding: 16px 40px;
+  font-size: 18px;
+  font-weight: 800;
+  white-space: nowrap;
+  transform: rotate(3deg);
+  transition: background 150ms var(--ease);
+}
+
+.e404__cta:hover {
+  background: #000;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame for this page ---------- */
+
+@media (max-width: 1023px) {
+  .e404 {
+    padding: 120px var(--edge-gutter) 64px;
+  }
+
+  /* The absolute placement above is the frame's 649x316 composition and does
+     not survive a phone, so at this width the scrap becomes a normal flow
+     block and the character sits under it. The rotations stay - they are the
+     page's whole character. */
+  .e404__inner {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 24px;
+  }
+
+  .e404__scrap {
+    width: 100%;
+    height: auto;
+    margin-inline-end: 0;
+    padding: 28px 22px 34px;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 20px;
+  }
+
+  .e404__frame {
+    inset: 0;
+    width: auto;
+    height: auto;
+    top: 0;
+  }
+
+  .e404__text,
+  .e404__cta {
+    position: static;
+    width: auto;
+  }
+
+  .e404__text {
+    font-size: 22px;
+  }
+
+  .e404__art {
+    width: 100%;
+    height: 300px;
+    display: flex;
+    justify-content: center;
+  }
+
+  .e404__art img {
+    position: static;
+    width: 320px;
+    height: 333px;
+  }
+}
+
+/* ================================================================
+   אתם יכולים להתחיל כאן - Figma 230:265, read 19.09
+   ================================================================ */
+
+.sh {
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 40px;
+  padding: 112px var(--page-inline);
+}
+
+/* 230:266 */
+.sh__title {
+  margin: 0;
+  width: 100%;
+  font-size: 80px;
+  font-weight: 800;
+  line-height: 0.86;
+  letter-spacing: -2.4px;
+  color: var(--ink);
+  text-align: center;
+}
+
+/* 279:219 */
+.sh__grid {
+  width: 100%;
+  display: flex;
+  align-items: stretch;
+  gap: 44px;
+}
+
+/* 279:220 - the six-card column is a fixed 660 in the frame */
+.sh__cards {
+  flex: none;
+  width: 660px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  grid-template-columns: repeat(2, 322px);
+  gap: 16px;
+  align-content: start;
+}
+
+.sh__cards > li {
+  display: flex;
+  min-width: 0;
+}
+
+/* 230:277 - the frame gives each card its own height (197-227px); they are a
+   grid here, so a row's cards match and the tallest content sets the row */
+.sh__card {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 207px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  /* Tal, 19.09: white with a thin border, not the frame's #fbfaf5 - that is
+     the page background, so the card had no edge and read as nothing. */
+  background: #fff;
+  border: 1px solid #dcdad2;
+  border-radius: 20px;
+  padding: 16px 18px;
+  text-align: right;
+  transition: transform 200ms var(--ease), box-shadow 200ms var(--ease);
+}
+
+/* INVENTED - the frame has no hover state for these cards. */
+.sh__card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.07);
+}
+
+/* 230:278 - the frame says 12px, under the floor */
+.sh__chip {
+  background: #f6f5f1;
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: var(--ink);
+  white-space: nowrap;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 230:280 */
+/* 230:280 etc - 17px, the frame's own size. The 19.09 type scale moved this to
+   19px and every card grew from the frame's 197-227 to 252-274, a quarter
+   taller. --type-body is for long-form reading; a card title the frame has
+   measured is not that. Same defect as .cmty__lead, found the same way. */
+.sh__card-title {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 17px;
+  font-weight: 700;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+/* 230:281 - the frame says 12.5px, under the floor */
+.sh__card-excerpt {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: var(--type-small);
+  line-height: 1.4;
+  color: #666;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 279:222 - the arrow on the LEFT, the reading pill on the right */
+.sh__row {
+  width: 100%;
+  margin-top: auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+/* 244:216 - the frame says 12px, under the floor */
+.sh__pill {
+  flex: none;
+  background: #f5f5f5;
+  border-radius: 999px;
+  padding: 8px 14px;
+  font-size: var(--type-small);
+  color: var(--ink-2);
+  white-space: nowrap;
+}
+
+/* 230:268 - the amber featured card */
+/* 230:268 is 525 tall while the six-card column beside it is 678 - the frame
+   does NOT stretch this card to match. With align-items:stretch on the grid it
+   grew to the column's height, which is what buried the illustration's
+   overhang inside the card again. */
+.sh__featured-wrap {
+  flex: 1 1 0;
+  min-width: 0;
+  align-self: flex-start;
+  display: flex;
+}
+
+.sh__featured {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 525px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  /* Tal, 19.09 (start-here-section-color-decision.md): ink, not the frame's
+     amber #fcaf18. Two of the seven illustration hues measured 1.02:1 and
+     1.00:1 on the amber - invisible - while every one of them holds 4.31:1 or
+     better on ink, whichever post is featured. */
+  background: var(--ink);
+  border-radius: 28px;
+  padding: 24px;
+  text-align: right;
+  /* the illustration deliberately hangs past the bottom edge - see
+     .sh__featured-art. Clipping it is what flattened this card. */
+  overflow: visible;
+  transition: transform 200ms var(--ease);
+}
+
+.sh__featured:hover {
+  transform: translateY(-2px);
+}
+
+.sh__badges {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* 230:271 / 230:273 - both say 12px in the frame, under the floor */
+/* the life-stage badge: outline only, ivory stroke at 35%, solid ivory text */
+.sh__badge {
+  background: transparent;
+  border: 1px solid rgba(251, 250, 245, 0.35);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: var(--paper);
+  white-space: nowrap;
+}
+
+/* "הכי חם בקבוצה" - the rust accent, white text, 4.03:1. Elyakim chose rust
+   over Tal's warm-yellow alternative so the page keeps one warm hue. */
+.sh__badge--hot {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+/* 230:274 - ivory on ink, 16.65:1 */
+.sh__featured-title {
+  width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 32px;
+  font-weight: 900;
+  line-height: 1.1;
+  color: var(--paper);
+}
+
+/* 230:275 - the same ivory at 70%, effective #bcbbb8, 9.07:1 on ink */
+.sh__featured-excerpt {
+  width: 100%;
+  min-width: 0;
+  font-size: var(--type-small);
+  line-height: 1.45;
+  color: rgba(251, 250, 245, 0.7);
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+/* 275:468 - 560x420 at (24, 219) INSIDE a card the frame draws 525 tall, so
+   the plate runs 114px past the card's bottom edge on purpose. That overhang
+   is this design's signature - the my-story figure and the post hero do the
+   same - and containing it made this the one flat card in the section. Taken
+   out of flow so the card keeps the frame's 525 height rather than growing to
+   swallow it. */
+.sh__featured-art {
+  position: absolute;
+  left: 24px;
+  right: 24px;
+  top: 219px;
+  display: block;
+  height: 420px;
+  background: #fff;
+  border-radius: 20px;
+  overflow: hidden;
+}
+
+.sh__featured-art img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+/* ---------- 1024-1279: INVENTED, no frame between 1440 and phone. The three
+   cards stay in a row but stop reserving the frame's 566px, which at this
+   width would leave three tall, narrow slivers. ---------- */
+
+@media (max-width: 1279px) and (min-width: 1024px) {
+  .tbh__cards {
+    gap: 20px;
+  }
+
+  .tbh__card {
+    min-height: 0;
+  }
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame for this section ---------- */
+
+@media (max-width: 1023px) {
+  .sh {
+    gap: 24px;
+    padding: 64px var(--edge-gutter);
+  }
+
+  .sh__title {
+    font-size: 34px;
+    line-height: 1;
+    letter-spacing: -0.8px;
+  }
+
+  /* the featured card leads, then the six cards in one column - two 322px
+     cards do not fit a phone and shrinking them makes both unreadable */
+  .sh__grid {
+    flex-direction: column;
+    gap: 16px;
+  }
+
+  .sh__cards {
+    width: 100%;
+    grid-template-columns: 1fr;
+  }
+
+  .sh__card {
+    min-height: 0;
+  }
+
+  .sh__featured {
+    min-height: 0;
+  }
+
+  .sh__featured-title {
+    font-size: 24px;
+  }
+
+  .sh__featured-art {
+    height: 220px;
+  }
+
+  /* the chip can carry two stages; it wraps rather than losing the second */
+  .sh__chip {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    overflow-wrap: anywhere;
+  }
+}
+
+/* ================================================================
+   ארגז כלים on the homepage - Figma 213:408 / 200:142, read 19.09
+   ================================================================ */
+
+.tbh {
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  padding: 90px var(--page-inline);
+}
+
+.tbh__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 25px;
+  text-align: center;
+}
+
+/* 200:148 - the frame's 87.75px, which is a scaled instance rather than a
+   round number; kept as measured */
+.tbh__title {
+  margin: 0;
+  max-width: 1048px;
+  font-size: 87.75px;
+  font-weight: 800;
+  line-height: 0.86;
+  letter-spacing: -2.63px;
+  color: var(--ink);
+}
+
+/* 200:149 */
+.tbh__subtitle {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.25;
+  color: var(--ink);
+}
+
+/* 200:209 - the frame's track is 1160px, but .tbh centres its children, so a
+   bare flex row sizes to max-content and blows past any viewport under
+   1160 + gutters. width:100% makes it take the available width instead and
+   lets the cards shrink through their own min-width:0. Caught at 1024 by
+   check-overflow; same class of defect as Mika's fix round 1. */
+.tbh__cards {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  width: 100%;
+  max-width: 1160px;
+  gap: 40px;
+}
+
+.tbh__cards > li {
+  display: flex;
+  min-width: 0;
+}
+
+/* I200:210 - 360px wide, 566 tall, body on top and the illustration below */
+.tbh__card {
+  flex: 1 1 auto;
+  min-width: 0;
+  width: 360px;
+  min-height: 566px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: #f5f5f5;
+  border-radius: 20px;
+  overflow: hidden;
+  text-align: right;
+  transition: transform 200ms var(--ease);
+}
+
+/* INVENTED - the frame has no hover state for these. */
+.tbh__card:hover {
+  transform: translateY(-3px);
+}
+
+.tbh__card-body {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 16px;
+  padding: 24px 24px 28px;
+}
+
+/* I200:210;149:160 - the title fills the row and the arrow sits at its LEFT */
+.tbh__card-head {
+  width: 100%;
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+/* I200:210;149:163 */
+.tbh__card-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-wrap: anywhere;
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 0.91;
+  letter-spacing: -1.52px;
+  color: var(--ink);
+}
+
+/* I200:210;149:164 */
+.tbh__card-desc {
+  width: 100%;
+  min-width: 0;
+  font-size: var(--type-body);
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+/* I200:210;149:249 - the frame says 14px, under the floor */
+.tbh__card-label {
+  background: #d9d9db;
+  border-radius: 20px;
+  padding: 10px;
+  font-size: var(--type-small);
+  font-weight: 500;
+  line-height: 1.25;
+  color: #000;
+  white-space: nowrap;
+}
+
+/* I200:210;149:166 - 302px tall on its own tinted plate, colour per card */
+.tbh__art {
+  display: block;
+  width: 100%;
+  height: 302px;
+  border-radius: 15px;
+  overflow: hidden;
+}
+
+.tbh__art img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+/* 200:281 */
+.tbh__foot {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+}
+
+/* 200:279 */
+.tbh__count {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 500;
+  color: #c87a53;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame for this section ---------- */
+
+@media (max-width: 1023px) {
+  .tbh {
+    gap: 28px;
+    padding: 64px var(--edge-gutter);
+  }
+
+  .tbh__title {
+    font-size: 34px;
+    line-height: 1;
+    letter-spacing: -0.9px;
+  }
+
+  .tbh__subtitle {
+    font-size: 17px;
+  }
+
+  /* three 360px cards do not fit a phone; they stack, same call as /toolbox */
+  .tbh__cards {
+    flex-direction: column;
+    width: 100%;
+    gap: 16px;
+  }
+
+  .tbh__card {
+    width: 100%;
+    min-height: 0;
+  }
+
+  .tbh__card-title {
+    font-size: 28px;
+    letter-spacing: -0.8px;
+  }
+
+  .tbh__art {
+    height: 220px;
+  }
+
+  .tbh__foot .cta-primary {
+    width: 100%;
+    justify-content: center;
+  }
+}
+
+/* ============================================================================
+   שאלות מהוואטסאפ - Figma 170:155 / 12:2
+   Built as markup, not as the frame's 1,445px flattened export: real text,
+   real links, and a layout that reflows on a phone.
+   ========================================================================= */
+
+.waq {
+  background: #fff;
+  display: flex;
+  justify-content: center;
+  padding: 0 55px; /* 12:2 sits at x=55 inside the 1440 frame */
+}
+
+/* 12:2 - the doodle tile is the plate's background, at the size the frame
+   paints it (506.5px) and at its 50% opacity. image-set so AVIF and WebP are
+   used where supported; a CSS background cannot go through <picture>. */
+.waq__plate {
+  position: relative;
+  isolation: isolate;
+  width: 100%;
+  max-width: 1330px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  padding: 90px 64px;
+  border-radius: 40px;
+  overflow: hidden;
+}
+
+.waq__plate::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  opacity: 0.5;
+  background-image: image-set(
+    url("/opt/wa-pattern-400.avif") type("image/avif"),
+    url("/opt/wa-pattern-400.webp") type("image/webp"),
+    url("/brand/wa-pattern.png") type("image/png")
+  );
+  background-size: 506.5px 507px;
+  background-position: top left;
+  background-repeat: repeat;
+}
+
+.waq__header {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+
+/* 12:4 */
+.waq__title {
+  margin: 0;
+  max-width: 680px;
+  font-size: 80px;
+  font-weight: 800;
+  line-height: 0.86;
+  letter-spacing: -2.4px;
+  color: var(--ink);
+}
+
+/* 12:5 */
+.waq__subtitle {
+  margin: 0;
+  max-width: 560px;
+  font-size: var(--type-body);
+  line-height: normal;
+  color: #595959;
+}
+
+/* 167:117 */
+.waq__stack {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 40px;
+  width: 492px;
+  max-width: 100%;
+}
+
+/* 149:258 */
+.waq__phone {
+  width: 100%;
+  height: 939px;
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  background: rgba(255, 255, 255, 0.7);
+  border: 11px solid #000;
+  border-radius: 39px;
+  overflow: hidden;
+}
+
+/* 149:259 */
+.waq__chrome {
+  background: #f4f1ec;
+  flex: 0 0 auto;
+}
+
+/* 149:260 */
+.waq__status {
+  height: 44px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px 0 24px;
+}
+
+.waq__clock {
+  font-size: var(--type-small); /* frame 15px */
+  font-weight: 590;
+  color: #0b0b0b;
+}
+
+/* the status cluster is a device chrome, not Hebrew: it keeps its own
+   left-to-right order (signal, wifi, battery) inside the RTL page */
+.waq__status-icons {
+  display: flex;
+  direction: ltr;
+  align-items: center;
+  gap: 5px;
+}
+
+.waq__signal {
+  display: flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+
+.waq__signal i {
+  width: 3px;
+  background: #0b0b0b;
+  border-radius: 1px;
+}
+
+.waq__signal i:nth-child(1) { height: 5px; }
+.waq__signal i:nth-child(2) { height: 8px; }
+.waq__signal i:nth-child(3) { height: 11px; }
+.waq__signal i:nth-child(4) { height: 14px; }
+
+.waq__wifi {
+  width: 14px;
+  height: 8px;
+}
+
+.waq__battery {
+  width: 22px;
+  height: 12px;
+  border: 1px solid #0b0b0b;
+  border-radius: 3px;
+  padding: 1px;
+  display: block;
+}
+
+.waq__battery span {
+  display: block;
+  width: 18px;
+  height: 8px;
+  background: #0b0b0b;
+  border-radius: 1.5px;
+}
+
+/* 149:273 - frame order is video, phone, spacer, name, avatar, back (L to R),
+   so under dir=rtl this row is written back to front. */
+.waq__nav {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
+}
+
+.waq__back {
+  font-size: 22px;
+  line-height: 1;
+  color: #0b0b0b;
+}
+
+.waq__avatar {
+  width: 47px;
+  height: 47px;
+  flex: none;
+}
+
+/* 149:278 */
+.waq__chat-name {
+  font-size: 22px;
+  font-weight: 500;
+  line-height: 0.8;
+  letter-spacing: -0.88px;
+  color: #0b0b0b;
+  white-space: nowrap;
+}
+
+.waq__nav-spacer {
+  flex: 1 0 0;
+}
+
+.waq__nav-icon {
+  width: 24px;
+  height: 24px;
+  flex: none;
+}
+
+/* 149:305 */
+.waq__messages {
+  margin: 0;
+  padding: 6px 0;
+  list-style: none;
+  flex: 1 1 auto;
+  overflow: hidden;
+}
+
+/* 167:93 - the bubble hugs the near edge, which under dir=rtl is the right */
+.waq__row {
+  display: flex;
+  justify-content: flex-start;
+  padding-block: 10px 9px;
+  padding-inline: 12px 60px;
+}
+
+/* 149:331 */
+.waq__bubble {
+  position: relative;
+  box-sizing: border-box;
+  width: 429px;
+  max-width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 12px;
+  background: #d9fed3;
+  border-radius: 18px;
+  /* the tail corner, physical: the bubble stays on the right in RTL */
+  border-bottom-right-radius: 5px;
+  color: #0a0a0a;
+  text-decoration: none;
+}
+
+/* 167:118 - the little tail, drawn rather than downloaded */
+.waq__bubble::after {
+  content: "";
+  position: absolute;
+  right: -7px;
+  bottom: 0;
+  width: 8px;
+  height: 9px;
+  background: #d9fed3;
+  clip-path: polygon(0 0, 0 100%, 100% 100%);
+}
+
+/* I167:94 - the frame shows one bubble in its tapped state */
+.waq__bubble.is-highlighted {
+  border-top: 1px solid #2e8038;
+}
+
+.waq__bubble--link {
+  cursor: pointer;
+  transition: background-color 0.18s ease, transform 0.18s ease;
+}
+
+.waq__bubble--link:hover,
+.waq__bubble--link:focus-visible {
+  background: #cdf9c4;
+  transform: translateY(-1px);
+}
+
+/* 149:332 */
+.waq__text {
+  width: 100%;
+  font-size: 20px;
+  font-weight: 500;
+  line-height: 1.11;
+  letter-spacing: -1px;
+  text-align: right;
+}
+
+.waq__meta {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  align-self: flex-start;
+}
+
+/* 149:334 - the frame sets 13px; the site floor is 15px and wins */
+.waq__time {
+  font-size: var(--type-small);
+  color: #4f6f52;
+  white-space: nowrap;
+}
+
+.waq__ticks {
+  width: 16px;
+  height: 9px;
+  flex: none;
+}
+
+/* 44:33 */
+.waq__input-bar {
+  background: #f6f4f0;
+  padding: 29px 21px;
+  flex: 0 0 auto;
+}
+
+/* 167:108 */
+.waq__ask {
+  margin: 0 0 15px;
+  text-align: right;
+  font-size: 20px;
+  line-height: 1.2;
+  letter-spacing: -0.6px;
+  color: #0a0a0a;
+}
+
+.waq__ask strong {
+  display: block;
+  font-weight: 700;
+}
+
+.waq__ask span {
+  font-weight: 400;
+}
+
+/* 167:110 - a real form: the field is an <input>, the send is a <button>. */
+.waq__form {
+  display: flex;
+  align-items: center;
+  gap: 22px;
+}
+
+/* the accessible name for the field and the send button; both need one, and
+   neither has room for visible text in this frame */
+.waq__label {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* 44:34 */
+.waq__field {
+  flex: 1 1 auto;
+  min-width: 0;
+  height: 53px;
+  padding-inline: 20px;
+  background: #fff;
+  border: 1px solid transparent;
+  border-radius: 26.5px;
+  font: inherit;
+  font-size: 17.93px;
+  color: var(--ink);
+  text-align: right;
+}
+
+.waq__field::placeholder {
+  color: #a6a6a6;
+}
+
+.waq__field:focus-visible {
+  outline: 2px solid #258c7a;
+  outline-offset: 2px;
+}
+
+.waq__field.is-invalid {
+  border-color: #c0392b;
+}
+
+.waq__error {
+  margin: 8px 0 0;
+  min-height: 1.2em;
+  text-align: right;
+  font-size: var(--type-small);
+  color: #c0392b;
+}
+
+/* the echoed question: deliberately NOT dressed as a sent message - no ticks,
+   a dashed outline, and an explicit "לא נשלח" */
+.waq__echoes {
+  margin: 0;
+  padding: 0 0 6px;
+  list-style: none;
+}
+
+.waq__bubble--pending {
+  background: #eef3ec;
+  border: 1px dashed #7a8b78;
+}
+
+.waq__bubble--pending::after {
+  background: #eef3ec;
+}
+
+.waq__unsent {
+  font-size: var(--type-small);
+  font-weight: 700;
+  color: #8a5340;
+  white-space: nowrap;
+}
+
+.waq__notice {
+  margin: 4px 12px 0 12px;
+  padding: 10px 12px;
+  background: #fff;
+  border: 1px solid #e0d8cc;
+  border-radius: 12px;
+  text-align: right;
+  font-size: var(--type-small);
+  line-height: 1.45;
+  color: var(--ink-2);
+}
+
+/* 167:30 - a real submit button */
+.waq__send {
+  flex: none;
+  width: 53px;
+  height: 53px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: #258c7a;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: background 150ms var(--ease);
+}
+
+.waq__send:hover {
+  background: #1f7566;
+}
+
+.waq__send:focus-visible {
+  outline: 2px solid #0b0b0b;
+  outline-offset: 2px;
+}
+
+.waq__send:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.waq__send svg {
+  width: 24px;
+  height: 24px;
+  transform: scaleX(-1);
+}
+
+/* 167:115 */
+.waq__cta {
+  width: 100%;
+  justify-content: center;
+  background: #0b0b0b;
+}
+
+/* The group URL is TBD, so the button is honestly inert - but "inert" must not
+   mean "unreadable". opacity fades the label and the fill TOWARDS EACH OTHER,
+   which took this pair to 2.47:1 as painted. Explicit colours instead: clearly
+   not the live button, still legible at 7.00:1. */
+.waq__cta:disabled {
+  cursor: not-allowed;
+  background: #595959;
+  color: #fff;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame exists for 170:155 ---------- */
+
+@media (max-width: 1023px) {
+  .waq {
+    padding: 0 var(--edge-gutter);
+  }
+
+  .waq__plate {
+    padding: 56px 20px;
+    gap: 28px;
+    border-radius: 28px;
+  }
+
+  .waq__title {
+    font-size: 40px;
+    line-height: 0.95;
+    letter-spacing: -1.2px;
+  }
+
+  .waq__subtitle {
+    font-size: 17px;
+  }
+
+  /* the phone stops being a fixed 939px box and simply grows with its
+     messages - a phone-inside-a-phone must not scroll internally */
+  .waq__phone {
+    height: auto;
+    border-width: 8px;
+    border-radius: 32px;
+  }
+
+  .waq__messages {
+    overflow: visible;
+  }
+
+  .waq__row {
+    padding-inline: 10px 28px;
+  }
+
+  .waq__text {
+    font-size: 17px;
+    letter-spacing: -0.4px;
+  }
+
+  .waq__ask {
+    font-size: 18px;
+  }
+
+  .waq__form {
+    gap: 12px;
+  }
+
+  .waq__field {
+    height: 46px;
+    font-size: 16px;
+  }
+
+  .waq__send {
+    width: 46px;
+    height: 46px;
+  }
+}
+
+/* ============================================================================
+   הקהילה - Figma 25:24 / 149:221
+   ========================================================================= */
+
+.cmty {
+  background: #fff;
+  display: flex;
+  justify-content: center;
+  padding: 100px var(--page-inline);
+}
+
+/* 149:221 */
+.cmty__card {
+  position: relative;
+  box-sizing: border-box;
+  width: 100%;
+  max-width: var(--content-max);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 40px;
+  padding: 45px;
+  background: var(--page-bg, #fbfaf5);
+  border-radius: 40px;
+  overflow: hidden;
+}
+
+/* 275:662 - the green plate behind the illustration */
+/* 275:662 - positioned against the ART box, not the card: the frame's (20, 17)
+   minus the art's own origin (45, 57.75). Plate, masks and illustration then
+   travel together, so the composition stays registered even though our copy
+   column is 439px where the frame's is 413.5 (Almoni wraps wider than the
+   frame's Rubik, and the note sits at the 15px floor against the frame's 14). */
+.cmty__plate {
+  position: absolute;
+  left: -25px;
+  top: -40.75px;
+  width: 158px;
+  height: 453px;
+  background: #b9e87d;
+  border-radius: 21px;
+  box-shadow: -3px 4px 0 0 #000;
+  z-index: 0;
+}
+
+.cmty__doodle {
+  position: absolute;
+  z-index: 2;
+  pointer-events: none;
+}
+
+/* 275:666 - inside the art box: frame (94.5, 84.5) minus the art's own origin
+   (45, 57.75) */
+.cmty__doodle--bubble {
+  left: 49.5px;
+  top: 26.75px;
+  width: 143px;
+  height: 67px;
+}
+
+/* 275:664 - same, frame (114, 223) minus (45, 57.75) */
+.cmty__doodle--squiggle {
+  left: 69px;
+  top: 165.25px;
+  width: 242.5px;
+  height: 163.8px;
+}
+
+/* 275:670 - anchored to the action block it points at, not to the card. In the
+   frame the arrow sits 87px to the left of that block and 51px down from its
+   top, which is beside the button; holding that relationship keeps it beside
+   the button whatever the column's height turns out to be. */
+.cmty__doodle--arrow {
+  left: -87px;
+  top: 51px;
+  width: 55px;
+  height: 34.5px;
+}
+
+/* 72:8 - the positioning context for the whole left-hand composition: the
+   green plate, the two paper-coloured masks that punch it back where the
+   illustration's own shapes sit, and the illustration itself. overflow stays
+   visible because the plate deliberately extends past this box, and the
+   illustration is a transparent PNG with no hard edge to clip. */
+.cmty__art {
+  position: relative;
+  z-index: 1;
+  flex: 0 1 517px;
+  min-width: 0;
+}
+
+/* frame order: plate, masks, illustration */
+.cmty__art picture img {
+  position: relative;
+  z-index: 2;
+}
+
+.cmty__art .cmty__doodle {
+  z-index: 1;
+}
+
+/* the illustration only - NOT the two doodle <img>s that now live in this box.
+   A bare `.cmty__art img` stretched them to the full 517px. */
+.cmty__art picture img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+/* 25:25 */
+.cmty__copy {
+  position: relative;
+  z-index: 3;
+  flex: 0 1 560px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 44px;
+}
+
+/* 149:225 */
+.cmty__intro {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  width: 100%;
+  text-align: right;
+}
+
+/* 25:26 */
+.cmty__title {
+  margin: 0;
+  font-size: 40px;
+  font-weight: 900;
+  line-height: 1.15;
+  color: var(--ink);
+}
+
+/* 25:27 - 16px, the frame's own size and the site's --type-small. The type
+   scale of 19.09 moved this to 19px, which grew the copy column from 413 to
+   495 and the card from 503 to 585. That broke the whole composition: the art
+   centres lower, so the vector doodles (which ARE the artwork's own speech
+   bubbles, drawn on top for crispness) stopped registering with it, and the
+   hand-drawn arrow stopped sitting beside the CTA. --type-body is for
+   long-form reading; this is a short marketing column. */
+.cmty__lead {
+  color: #595959;
+  font-size: var(--type-small);
+}
+
+.cmty__lead p {
+  margin: 0;
+}
+
+/* 25:28 */
+.cmty__points {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+/* 149:224 etc - mark first so it sits at the right, as the frame draws it */
+.cmty__point {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: var(--type-small);
+  line-height: 1.4;
+  color: var(--ink);
+}
+
+.cmty__point span {
+  flex: 1 1 auto;
+  min-width: 0;
+  text-align: right;
+}
+
+.cmty__sparkle {
+  flex: none;
+  width: 14px;
+  height: 14px;
+}
+
+/* 200:278 - position:relative so the arrow can hang off its left edge */
+.cmty__action {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  align-self: flex-start;
+}
+
+/* 200:277 - Tal 19.09, chosen by Nir: the WhatsApp green stays as a SURFACE
+   (the button fill below) but never as body copy. Green on the white card
+   measured 2.24:1; ink measures 16.65:1. */
+.cmty__count {
+  margin: 0;
+  font-size: var(--type-small);
+  color: var(--ink);
+}
+
+.cmty__count strong {
+  font-weight: 700;
+}
+
+/* 149:232 */
+.cmty__cta-wrap {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 149:233 - the fill is untouched on purpose: the hue IS the WhatsApp
+   association and the reason the block reads instantly. Only the label moves,
+   white (2.35:1) to ink (7.42:1). */
+.cmty__cta {
+  background: #3dc154;
+  color: var(--ink);
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+/* same reasoning as .waq__cta:disabled - the faded pair measured 3.35:1, well
+   under the 7.42:1 Tal specified for the live button. A lighter green reads as
+   inactive and keeps ink legible at 11.24:1. */
+.cmty__cta:disabled {
+  cursor: not-allowed;
+  background: #a9dcb2;
+  color: var(--ink);
+}
+
+/* 149:234 - frame sets 14px; the site floor is 15px and wins */
+.cmty__note {
+  margin: 0;
+  max-width: 228px;
+  text-align: center;
+  font-size: var(--type-small);
+  color: #6b6b6b;
+}
+
+.cmty__note span {
+  display: block;
+}
+
+/* ---------- under 1024: INVENTED, no mobile frame exists for 25:24 ----------
+   The card becomes one column with the illustration under the copy, and the
+   absolutely-positioned doodles are dropped: they are placed against the
+   1312px card and have no meaning at any other width. */
+
+@media (max-width: 1023px) {
+  .cmty {
+    padding: 56px var(--edge-gutter);
+  }
+
+  .cmty__card {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 28px;
+    padding: 24px;
+    border-radius: 28px;
+  }
+
+  .cmty__plate,
+  .cmty__doodle {
+    display: none;
+  }
+
+  .cmty__copy {
+    flex: 0 0 auto;
+    align-items: stretch;
+    gap: 28px;
+  }
+
+  .cmty__title {
+    font-size: 30px;
+    line-height: 1.1;
+  }
+
+  .cmty__action {
+    align-self: center;
+  }
+
+  .cmty__art {
+    flex: 0 0 auto;
+    order: 2;
+  }
+}
+
+/* ============================================================================
+   THE ARROW-CIRCLE - Figma 530:1467 / 530:1463
+   One rule for the mark that appears on every card. It was four rules that had
+   drifted (28/28/34/24px, 1px and 1.5px borders, three rotations and one SVG
+   glyph); Elyakim saw the result and called it what it is, a component.
+   Callers may vary the size and the colour, nothing else.
+   ========================================================================= */
+
+.arrow-circle {
+  --arrow-size: 28px;
+  flex: none;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: var(--arrow-size);
+  height: var(--arrow-size);
+  background: #fff;
+  border: 1.5px solid currentColor;
+  border-radius: 999px;
+  /* the frame says 13px; this is a text node, so the site floor applies */
+  font-size: var(--type-small);
+  font-weight: 700;
+  line-height: 1;
+  color: var(--ink-2);
+  transform: rotate(45deg);
+  transition: color 200ms var(--ease);
+}
+
+/* the life-stages card is the one place the mark reacts to a hover */
+.ls__card-arrow {
+  margin-top: 1px;
+}
+
+.ls__card:hover .ls__card-arrow {
+  color: var(--accent);
+}
+
+.tbh__arrow {
+  color: var(--ink);
+}

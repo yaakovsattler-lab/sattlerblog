@@ -1,0 +1,32 @@
+{
+  "name": "sattlerblog",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "predev": "node scripts/ensure-fonts.mjs",
+    "dev": "next dev -p 3100",
+    "prebuild": "node scripts/ensure-fonts.mjs",
+    "build": "next build",
+    "start": "next start -p 3100",
+    "frames": "python3 scripts/extract-frames.py",
+    "verify": "node scripts/verify.mjs",
+    "images": "node scripts/optimise-images.mjs",
+    "check": "node scripts/check-overflow.mjs && node scripts/check-chips.mjs && node scripts/check-rtl.mjs && node scripts/check-contrast.mjs && node scripts/check-wide.mjs && node scripts/check-ls-composition.mjs && node scripts/check-ticker.mjs && node scripts/check-mechanics.mjs && node scripts/check-post-positions.mjs && node scripts/all-posts-check.mjs && node scripts/floor-all-pages.mjs && node scripts/check-alpha.mjs && node scripts/check-weight.mjs && node scripts/check-frame-format.mjs",
+    "frames:avif": "node scripts/encode-frames-avif.mjs",
+    "baseline": "node scripts/baseline.mjs"
+  },
+  "dependencies": {
+    "gsap": "3.15.0",
+    "next": "16.3.3",
+    "react": "19.2.8",
+    "react-dom": "19.2.8"
+  },
+  "devDependencies": {
+    "@fontsource/rubik": "5.3.0",
+    "@types/node": "^20",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "playwright": "1.63.0",
+    "typescript": "^5"
+  }
+}
