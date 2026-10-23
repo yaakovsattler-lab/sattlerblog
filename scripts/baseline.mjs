@@ -48,6 +48,15 @@ const fileKey = (r) => (r === "/" ? "home" : r.slice(1).replace(/\//g, "__"));
 function normaliseHtml(html) {
   return html
     .replace(/<script\b[^>]*>[\s\S]*?<\/script>/g, "")
+    /* stylesheets are compared by CONTENT (<route>.css), not by how many files
+       the bundler split them into */
+    .replace(/<link\b[^>]*rel="stylesheet"[^>]*\/?>/g, "")
+    /* React useId values encode the component tree's shape, so a new wrapper
+       layout renumbers every form field id without changing anything visible */
+    .replace(/_R_[A-Za-z0-9]+_/g, "_R_*_")
+    /* an empty Suspense boundary renders nothing; where its marker sits is not
+       observable */
+    .replace(/<!--\$--><!--\/\$-->/g, "")
     .replace(/<link\b[^>]*(?:rel="preload"|rel="modulepreload"|as="script")[^>]*\/?>/g, "")
     .replace(/\/_next\/static\/[^"' )]+/g, "/_next/static/*")
     .replace(/"buildId":"[^"]*"/g, '"buildId":"*"')
@@ -90,7 +99,15 @@ async function capture(dir) {
   for (const r of routes) {
     const key = fileKey(r);
     const res = await fetch(BASE + r);
-    fs.writeFileSync(path.join(dir, `${key}.ssr.html`), normaliseHtml(await res.text()));
+    const raw = await res.text();
+    fs.writeFileSync(path.join(dir, `${key}.ssr.html`), normaliseHtml(raw));
+    /* every stylesheet the page links, in document order, concatenated */
+    let css = "";
+    for (const m of raw.matchAll(/<link\b[^>]*rel="stylesheet"[^>]*>/g)) {
+      const href = (m[0].match(/href="([^"]+)"/) || [])[1];
+      if (href) css += await (await fetch(new URL(href, BASE))).text();
+    }
+    fs.writeFileSync(path.join(dir, `${key}.css`), css.replace(/\/_next\/static\/media\/[^)"' ]+/g, "/_next/static/media/*"));
     for (const w of WIDTHS) {
       const ctx = await b.newContext({
         viewport: { width: w, height: 900 },
@@ -166,6 +183,8 @@ async function diff(baseDir, newDir) {
     const ssrB = fs.readFileSync(path.join(newDir, `${key}.ssr.html`), "utf8");
     checks++;
     if (ssrA !== ssrB) fails.push(`${r} server HTML differs`);
+    checks++;
+    if (fs.readFileSync(path.join(baseDir, `${key}.css`), "utf8") !== fs.readFileSync(path.join(newDir, `${key}.css`), "utf8")) fails.push(`${r} CSS differs`);
     for (const w of widths) {
       const domA = fs.readFileSync(path.join(baseDir, `${key}@${w}.dom.html`), "utf8");
       const domB = fs.readFileSync(path.join(newDir, `${key}@${w}.dom.html`), "utf8");
@@ -178,7 +197,7 @@ async function diff(baseDir, newDir) {
   }
   await b.close();
   for (const f of fails) console.log("FAIL " + f);
-  console.log(fails.length ? `${fails.length} of ${checks} checks differ` : `zero change: ${checks} checks (${routes.length} routes x ${widths.length} widths, pixels + DOM + server HTML)`);
+  console.log(fails.length ? `${fails.length} of ${checks} checks differ` : `zero change: ${checks} checks (${routes.length} routes x ${widths.length} widths, pixels + DOM + server HTML + CSS)`);
   process.exitCode = fails.length ? 1 : 0;
 }
 

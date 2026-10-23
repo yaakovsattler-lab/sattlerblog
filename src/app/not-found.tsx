@@ -1,5 +1,8 @@
 import Link from "next/link";
 import Img from "@/components/Img";
+import Navbar from "@/components/Navbar";
+import Footer from "@/components/Footer";
+import "./globals.css";
 
 export const metadata = { title: "העמוד לא נמצא" };
 
@@ -15,34 +18,41 @@ export const metadata = { title: "העמוד לא נמצא" };
  * them, and all three are dropped under prefers-reduced-motion... no: they are
  * static, not motion, so they stay. What is dropped is nothing.
  */
+/* An unmatched URL renders here inside the ROOT layout only, which carries no
+   chrome since the Studio split - so the 404 brings its own navbar, footer
+   and stylesheet, exactly as (site)/layout.tsx does. */
 export default function NotFound() {
   return (
-    <main className="e404">
-      <div className="e404__inner" data-node-id="601:716">
-        <div className="e404__scrap" data-node-id="530:259">
-          <span className="e404__frame" data-node-id="522:241" aria-hidden="true" />
-          <h1 className="e404__text" data-node-id="522:242">
-            העמוד הזה לא קיים. קורה.
-            <br />
-            גם אני לפעמים מחפש כסף במקומות שהוא לא נמצא בהם...
-          </h1>
-          <Link className="e404__cta" href="/" data-node-id="522:243">
-            קחו אותי הביתה
-          </Link>
-        </div>
+    <>
+      <Navbar />
+      <main className="e404">
+        <div className="e404__inner" data-node-id="601:716">
+          <div className="e404__scrap" data-node-id="530:259">
+            <span className="e404__frame" data-node-id="522:241" aria-hidden="true" />
+            <h1 className="e404__text" data-node-id="522:242">
+              העמוד הזה לא קיים. קורה.
+              <br />
+              גם אני לפעמים מחפש כסף במקומות שהוא לא נמצא בהם...
+            </h1>
+            <Link className="e404__cta" href="/" data-node-id="522:243">
+              קחו אותי הביתה
+            </Link>
+          </div>
 
-        <div className="e404__art" data-node-id="601:715">
-          <Img
-            name="error-404-scene"
-            fallback="/brand/error-404-scene.png"
-            alt=""
-            width={920}
-            height={956}
-            sizes="(max-width: 1023px) 320px, 920px"
-            priority
-          />
+          <div className="e404__art" data-node-id="601:715">
+            <Img
+              name="error-404-scene"
+              fallback="/brand/error-404-scene.png"
+              alt=""
+              width={920}
+              height={956}
+              sizes="(max-width: 1023px) 320px, 920px"
+              priority
+            />
+          </div>
         </div>
-      </div>
-    </main>
+      </main>
+      <Footer />
+    </>
   );
 }

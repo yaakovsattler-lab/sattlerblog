@@ -1,6 +1,7 @@
 # sattlerblog
 
-Yaakov Sattler's site. Next.js 16 (App Router), static output.
+Yaakov Sattler's site. Next.js 16 (App Router), static output, Sanity Studio
+embedded at `/studio`.
 
 ## Run it
 
@@ -29,10 +30,23 @@ font file would redistribute it.
   moves the reader to Sanity and deletes this folder.
 - Everything else under `src/data/`.
 
+## Sanity
+
+- Project `mi7m5luj`. The Studio at `/studio` reads the dataset named in
+  `NEXT_PUBLIC_SANITY_DATASET` (default `development`).
+- Schema: `src/sanity/schemaTypes/`. Desk structure: `src/sanity/structure.ts`.
+- No token is needed for the Studio: editors sign in with their own Sanity
+  account. **Never commit a token** - this repository is public.
+- The public pages do not read Sanity yet (plan stage 4). They render from the
+  local files exactly as before.
+- Deploying the schema to the Content Lake: `npx sanity login` once, then
+  `npx sanity schemas deploy`.
+
 ## Checks
 
 ```bash
 npm run check                                  # the full harness (needs the server on 3100)
+npm run check:studio                           # Studio menu, schema, labels, slugs - no server, no sign-in
 node scripts/baseline.mjs capture <dir>        # screenshots + HTML of every route at 390/768/1440
 node scripts/baseline.mjs check <baseline-dir> # re-capture and diff: pixels, hydrated DOM, server HTML
 ```

@@ -1,8 +1,5 @@
 import type { Metadata, Viewport } from "next";
 import localFont from "next/font/local";
-import "./globals.css";
-import Navbar from "@/components/Navbar";
-import Footer from "@/components/Footer";
 
 /*
  * Almoni Neue, self-hosted, with the same weight mapping the built site uses
@@ -47,16 +44,17 @@ export const viewport: Viewport = {
   initialScale: 1,
 };
 
+/*
+ * Root layout: the document shell and the font only. The site's chrome
+ * (navbar, footer, global stylesheet) lives in (site)/layout.tsx and in
+ * not-found.tsx, so the embedded Studio at /studio gets none of it.
+ */
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html dir="rtl" lang="he" className={almoniNeue.variable}>
-      <body>
-        <Navbar />
-        {children}
-        <Footer />
-      </body>
+      <body>{children}</body>
     </html>
   );
 }
