@@ -20,3 +20,4 @@ screenshots/
 scripts/__pycache__/
 .DS_Store
 *.log
+scripts/migrate/.dry-run.json
